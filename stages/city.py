@@ -907,7 +907,7 @@ ROUTES = [
     dict(a='fifth', b='diner', how='smash_through', wall='east'),
 ]
 START = {'main': [(170.0, 118.0), (340.0, 112.0)], 'fifth': [(1400.0, 118.0), (1580.0, 112.0)]}
-TITLE_PAN = dict(start=(560.0, 6.0), end=(60.0, 14.0))
+TITLE_PAN = dict(start=(300.0, 6.0), end=(60.0, 14.0))
 
 
 def _area_y(self, area, x, z):
@@ -1193,3 +1193,667 @@ Stage.smash_through = _smash_through
 
 def setup(world):
     return None
+
+
+# ================================================================== HULK-2: the subway level, signs, collapsing facades
+# The subway under 5TH AVE becomes an area: the road caves in under a titan's landing (a route down, the water main
+# bursting), and a titan leaps back up through the hole. Hanging signs fall, a facade section collapses when a body or
+# a car is thrown through it, steel columns buckle, light fittings fall, the third rail electrocutes.
+import moves  # noqa: E402
+
+class Sign(pr.Prop):
+    """A hanging shop sign on a bracket over the sidewalk: knocked down, it swings off, falls and smashes."""
+
+    def __init__(self, x, z, h, text, color, seed=0):
+        self.x, self.z, self.h, self.deg = x, z, h, 0.0
+        self.text, self.color, self.seed = text, color, seed
+        self.fall_t = None
+        self.dir = 1
+        self.arr = self.bake(False)
+        self.broken = self.bake(True)
+
+    def bake(self, broken):
+        m = text_mask(self.text)
+        w, hh = m.shape[1] + 6, 11
+        arr = np.zeros((hh, w, 4), np.float32)
+        arr[..., :3] = hexc('1a1418')
+        arr[..., 3] = 1.0
+        arr[0, :, :3] = hexc('5a5060')
+        arr[-1, :, :3] = hexc('0a080a')
+        col = hexc(self.color) * (0.35 if broken else 1.0)
+        arr[3:8, 3:3 + m.shape[1], :3][m] = col
+        if broken:
+            n = hash_noise(*np.meshgrid(np.arange(w), np.arange(hh)), self.seed)
+            arr[n > 0.75, 3] = 0.0
+        return pr.outline(arr)
+
+    def place(self, t):
+        if self.fall_t is None or t < self.fall_t:
+            return self.x, self.z, self.h, 0.0
+        u = min(1.0, (t - self.fall_t) / 0.55)
+        h = self.h * (1 - u * u)
+        return self.x + self.dir * 10 * u, self.z + 10 * u, h, self.dir * 80 * u
+
+    def key(self, t):
+        return self.place(t)[1]
+
+    def draw(self, cv, off, t):
+        x, z, h, deg = self.place(t)
+        down = self.fall_t is not None and t >= self.fall_t + 0.55
+        if self.fall_t is None or t < self.fall_t:
+            # the bracket from the wall
+            for k in range(6):
+                xi, yi = int(round(x + off[0])), int(round(floor_y(self.z) - self.h - 6 + k + off[1]))
+                if 0 <= xi < cv.shape[1] and 0 <= yi < cv.shape[0]:
+                    cv[yi, xi] = hexc('2a2430')
+        arr = self.broken if down else self.arr
+        pr.blit_sprite(cv, arr, (arr.shape[1] / 2, 0), x + off[0], floor_y(z) - h + off[1], deg)
+
+    def lights(self, t):
+        if self.fall_t is not None and t >= self.fall_t:
+            return []
+        x, z, h, _ = self.place(t)
+        return [(x, floor_y(z) - h + 5, 22, hexc(self.color), 0.35, 1.0)]
+
+
+_h2_orig_setup = _setup_props
+
+
+def _setup_props_h2(self):
+    _h2_orig_setup(self)
+    self.signs = [Sign(150, 4, 48, 'BAR', 'ff5a8a', 1), Sign(330, 4, 50, 'PAWN', 'ffd84a', 2),
+                  Sign(520, 4, 46, 'DRUGS', '5affa0', 3), Sign(1290, 4, 50, 'BANK', 'ffe8a0', 4),
+                  Sign(1470, 4, 52, 'DELI', 'ff9a3a', 5), Sign(1720, 4, 48, 'HOTEL', 'ff4a4a', 6)]
+    self.props += self.signs
+    self.holes = []
+
+
+_setup_props = _setup_props_h2
+
+
+def _init_h2(self):
+    set_projection(Y0, FS)
+    _orig_init(self)
+    _setup_props_h2(self)
+
+
+Stage.__init__ = _init_h2
+
+
+def over_hole(stage, x, z):
+    for (x0, x1, z0, z1) in stage.holes:
+        if x0 + 4 < x < x1 - 4 and z0 < z < z1 + 30:
+            return True
+    return False
+
+
+def _ground_h2(self, x, z, t, y=None):
+    """The street at 0 (the subway floor -DS once someone is below it, or where the road has caved in)."""
+    if y is not None and y < -40:
+        return -DS
+    if self.holes and over_hole(self, x, z):
+        return -DS
+    if -10 <= z <= ZM + 30 and -20 <= x <= SW + 20:
+        return 0.0
+    return VOID
+
+
+def _surface_fn_h2(self, x, z, y, t):
+    h = -DS if y < -40 else 0.0
+    return lambda X, Z, h=h: h
+
+
+def _ground_arr_h2(self, x, z, h, t):
+    g = np.where(h < -40, -DS, 0.0).astype(np.float32)
+    if self.holes:
+        for (x0, x1, z0, z1) in self.holes:
+            m = (x > x0 + 4) & (x < x1 - 4) & (z > z0) & (z < z1 + 30)
+            g[m] = -DS
+    return g, np.ones(x.shape, bool)
+
+
+def _cam_limits_h2(self, world, t):
+    ys = [f.y for n, f in world.f.items() if not world.is_hidden(n, t)] or [0.0]
+    if all(y < -100 for y in ys):
+        return (SUB[0], CAM_X[1]), CAM_Y['subway']
+    if any(y < -60 for y in ys):
+        return CAM_X, (CAM_Y['street'][0], CAM_Y['subway'][1])
+    return CAM_X, CAM_Y['street']
+
+
+Stage.ground = _ground_h2
+Stage.surface_fn = _surface_fn_h2
+Stage.ground_arr = _ground_arr_h2
+Stage.cam_limits = _cam_limits_h2
+
+AREAS['subway'] = dict(x=(1210.0, 1880.0), z=(110.0, 186.0), y=-DS, center=(1420.0, 150.0), size='wide',
+                       floor='stone', label='the 5TH AVE subway')
+ROUTES += [
+    # a titan's landing caves the road in: both fall into the subway (the water main bursts)
+    dict(a='fifth', b='subway', how='cave_in', needs_tier=4),
+    # a titan leaps back up through the hole, carrying the other by the throat
+    dict(a='subway', b='fifth', how='leap_up', needs_tier=4),
+]
+
+
+def _area_y_h2(self, area, x, z):
+    return -DS if area == 'subway' else 0.0
+
+
+def _area_of_h2(self, x, z, y, t):
+    if y < -40:
+        return 'subway'
+    for name, a in AREAS.items():
+        if name != 'subway' and a['x'][0] - 60 <= x <= a['x'][1] + 60:
+            return name
+    return None
+
+
+Stage.area_y = _area_y_h2
+Stage.area_of = _area_of_h2
+
+
+# ------------------------------------------------------------------ more things to smash
+_h2_orig_smash = Target.smash
+_h2_orig_ok = Target.ok
+
+
+def _ok_h2(self, t):
+    r = self.ref
+    if self.kind == 'sign':
+        return r.fall_t is None
+    if self.kind == 'beam':
+        return r.bend_t is None
+    if self.kind == 'fluo':
+        return r.drop_t is None
+    if self.kind == 'pendant':
+        return r.drop_t is None
+    if self.kind == 'facade':
+        return self.used < 1
+    return _h2_orig_ok(self, t)
+
+
+def _smash_h2(self, world, t, power, out, seed):
+    r = self.ref
+    k = self.kind
+    if k == 'sign':
+        self.used += 1
+
+        def drop(w):
+            r.fall_t = w.t
+            r.dir = out
+            x, y = r.x, floor_y(r.z) - r.h
+            sparks_at(w, x, y, r.z, 22, seed, elec=True)
+            w.cue('pole_hit', x=x)
+            w.cue('sparks', x=x, dur=0.6)
+
+        def lands(w):
+            x, z, h, _ = r.place(w.t)
+            glass_burst(w, x, floor_y(z) - 2, z, 24, seed + 1, up=20)
+            sparks_at(w, x, floor_y(z) - 2, z, 16, seed + 2, elec=True)
+            w.shake(w.t, 2.5, 0.25)
+            w.cue('metal_crash', x=x)
+            w.cue('glass', x=x, power=0.8)
+        world.at(t, drop)
+        world.at(t + 0.55, lands)
+        return t
+    if k == 'beam':
+        self.used += 1
+
+        def buckle(w):
+            r.bend_t = w.t
+            r.bend = 7.0 + 3 * power
+            r.bend_dir = out
+            y = floor_y(r.z) + DS - 50
+            sparks_at(w, r.x, y, r.z, 26, seed)
+            fx.burst(w, fx.CHIP, r.x, CEIL1 + 2, r.z, 20, (20, 80), angle=math.pi / 2, spread=1.2, life=(1.0, 2.0),
+                     size=(1, 2.2), seed=seed + 1)
+            fx.burst(w, fx.DUST, r.x, CEIL1 + 4, r.z, 20, (10, 40), life=(0.8, 1.6), size=(1.8, 3.0), seed=seed + 2)
+            w.shake(w.t, 5.0, 0.4)
+            w.cue('metal_crash', x=r.x, power=1.6)
+            w.cue('stone_crash', x=r.x, power=1.0)
+        world.at(t, buckle)
+        return t
+    if k == 'fluo':
+        self.used += 1
+
+        def fall(w):
+            r.drop_t = w.t
+            y, _ = r.pos(w.t)
+            sparks_at(w, r.x, y, r.z, 20, seed, elec=True)
+            w.cue('sparks', x=r.x, dur=0.5)
+
+        def smash_(w):
+            y, _ = r.pos(w.t)
+            glass_burst(w, r.x, y, r.z, 26, seed + 1, up=20)
+            w.cue('glass', x=r.x, power=0.8)
+            w.cue('metal_crash', x=r.x)
+        world.at(t, fall)
+        world.at(t + 0.5, smash_)
+        return t
+    if k == 'pendant':
+        self.used += 1
+
+        def fall(w):
+            r.drop_t = w.t
+            sparks_at(w, r.x, r.top_row, r.z, 12, seed, elec=True)
+
+        def smash_(w):
+            x, y, _ = r.pos(w.t)
+            glass_burst(w, x, y, r.z, 20, seed + 1, up=15)
+            w.cue('glass', x=x, power=0.6)
+        world.at(t, fall)
+        world.at(t + 0.45, smash_)
+        return t
+    if k == 'facade':
+        self.used += 1
+        facade_collapse(world, self.x, t, power, seed)
+        return t
+    return _h2_orig_smash(self, world, t, power, out, seed)
+
+
+Target.ok = _ok_h2
+Target.smash = _smash_h2
+_h2_orig_targets = _targets
+
+
+def _targets_h2(self, area, t):
+    if not hasattr(self, '_targets_h2'):
+        T = []
+        for sg in self.signs:
+            T.append(Target(self, 'sign', 'main' if sg.x < 680 else 'fifth', sg.x, sg.z, sg.h, sg))
+        for b in [p for p in self.props if isinstance(p, pr.Beam)]:
+            T.append(Target(self, 'beam', 'subway', b.x, b.z, -DS + 40, b))
+        for fl in [p for p in self.props if isinstance(p, pr.Fluo)]:
+            T.append(Target(self, 'fluo', 'subway', fl.x, fl.z, fl.h, fl))
+        for pd in self.pendants:
+            T.append(Target(self, 'pendant', 'diner', pd.x, pd.z, pd.h, pd))
+        for x in (210.0, 470.0):
+            T.append(Target(self, 'facade', 'main', x, 6.0, 30))
+        for x in (1340.0, 1680.0):
+            T.append(Target(self, 'facade', 'fifth', x, 6.0, 30))
+        self._targets_h2 = T
+    base = _h2_orig_targets(self, area, t) if area != 'subway' else []
+    return base + [x for x in self._targets_h2 if x.area == area and x.ok(t)]
+
+
+Stage.targets = _targets_h2
+
+
+def facade_collapse(world, x, t, power, seed):
+    """A body or a car thrown through a building front: the wall bursts open, then a section of the facade above it
+    collapses onto the sidewalk (bricks falling from high up, a dust cloud, a rubble pile that stays, the windows and
+    the neon above dark)."""
+    def burst(w):
+        rng = _rng(seed)
+        row = floor_y(0) - 30
+        for k in range(3):
+            w.stage.wall_crater(x + rng.uniform(-8, 8), row - k * 12, 12 + 4 * power, seed + k, hole=True,
+                                brick='6a2a22')
+        facade_gap(w.stage, x, floor_y(0) - 64 - 8 * power, floor_y(0) - 14, 16 + 4 * power, seed + 5)
+        w.stage.blood_on_wall(x, row + 6, seed + 6)
+        glass_burst(w, x, row, 3, int(40 * power), seed + 7, angle=math.pi / 2, spread=1.5, up=40)
+        fx.burst(w, fx.BRICK, x, row, 3, int(40 * power), (40, 180), angle=math.pi / 2, spread=1.3, life=(0.9, 2.0),
+                 size=(1, 2.6), seed=seed + 8, zs=1.4, up=50)
+        fx.burst(w, fx.DUST, x, row, 4, int(40 * power), (20, 80), life=(0.9, 1.8), size=(2.2, 3.6), seed=seed + 9,
+                 zs=1.4)
+        w.shake(w.t, 5.0 + power, 0.5)
+        w.flash(w.t, 0.15, 0.06)
+        w.cue('wall_break', x=x, power=round(1.5 + power * 0.5, 2))
+        w.cue('glass', x=x, power=2.0)
+
+    def collapse(w):
+        rng = _rng(seed + 20)
+        n = int(90 * power)
+        w.particles.spawn(fx.BRICK, x + rng.uniform(-28, 28, n), rng.uniform(2, 8, n), rng.uniform(40, 110, n),
+                          rng.uniform(-30, 30, n), rng.uniform(10, 60, n), rng.uniform(-20, 30, n),
+                          rng.uniform(1.4, 2.6, n), rng.uniform(1.2, 2.8, n), rng=rng)
+        for k in range(int(50 * power)):                      # the rubble pile at its foot
+            w.stage.stamp(x + rng.uniform(-30, 30), rng.uniform(6, 40), fx.BRICK_C[rng.integers(1, 4)] *
+                          rng.uniform(0.7, 1.1), r=rng.uniform(1.0, 2.8), seed=seed + 100 + k)
+        for k in range(14):
+            w.stage.stamp(x + rng.uniform(-34, 34), rng.uniform(8, 44), hexc('3a3436'), r=rng.uniform(2.0, 3.5),
+                          alpha=0.5, seed=seed + 200 + k)
+        fx.burst(w, fx.DUST, x, floor_y(0) - 40, 6, int(70 * power), (20, 110), life=(1.2, 2.6), size=(2.4, 3.8),
+                 seed=seed + 21, zs=1.6)
+        facade_gap(w.stage, x, floor_y(0) - 92 - 8 * power, floor_y(0) - 10, 24 + 5 * power, seed + 22)
+        w.shake(w.t, 6.0, 0.8)
+        w.cue('cave_in', x=x)
+    world.at(t, burst)
+    world.at(t + 0.35, collapse)
+
+
+def facade_gap(stage, x, top, bottom, half, seed):
+    """Where a facade section has come down: a ragged opening into the dark building (rows top..bottom, stage image
+    rows), its edges broken brick, the floors inside showing as pale slab lines, a little light deep inside."""
+    img = stage.img
+    rng = _rng(seed)
+    t0, b0 = int(top) + PAD, int(bottom) + PAD
+    for row in range(t0, b0):
+        k = (row - t0) / max(1, b0 - t0)
+        w_ = half * (0.65 + 0.35 * math.sin(k * math.pi)) + rng.uniform(-3, 3)
+        if row < t0 + 6:
+            w_ *= 0.4 + 0.6 * (row - t0) / 6
+        xa, xb = int(x - w_) + PAD, int(x + w_) + PAD
+        if xb <= xa or not 0 <= row < img.shape[0]:
+            continue
+        xa, xb = max(0, xa), min(img.shape[1], xb)
+        img[row, xa:xb] = img[row, xa:xb] * 0.12 + hexc('0a080c') * 0.88
+        if (row - t0) % 22 in (0, 1):                             # a floor slab, broken off
+            img[row, xa:xb] = hexc('5a565e') if (row - t0) % 22 == 0 else hexc('2a2830')
+        for e, cc in ((xa - 1, '8a3a28'), (xa - 2, '5a2418'), (xb, '8a3a28'), (xb + 1, '5a2418')):
+            if 0 <= e < img.shape[1] and rng.uniform() < 0.8:
+                img[row, e] = hexc(cc)
+    for _ in range(3):
+        ly = rng.uniform(t0 + 10, b0 - 10)
+        lx = x + rng.uniform(-half * 0.5, half * 0.5) + PAD
+        if 0 <= int(ly) < img.shape[0] and 0 <= int(lx) < img.shape[1] - 2:
+            img[int(ly), int(lx):int(lx) + 2] = hexc('ffd890') * 0.7
+
+
+def _cave_in_route(self, c, A, D, t, route):
+    """The meteor: A leaps clean out of the picture, D looks up, A comes down fists first and the road caves in under
+    them both; the water main bursts and pours down the shaft; both land in the subway."""
+    import beats as B
+    from acts import fall_lie_up, floor_hit, guard, crater
+    from scene import arc
+    w = c.w
+    ax0 = max(1280.0, min(1760.0, D.x_at(t)))
+    spot = (ax0, 176.0)
+    hole = (spot[0] - 54, spot[0] + 48, 140.0, ZM)
+    self.planned_holes = getattr(self, 'planned_holes', []) + [hole]      # the beats keep clear of it from now on
+    t_jump = t
+    A.add(t_jump, 'leap', 0.9, dx=0, air=lambda u, y0=A.y_at(t_jump): y0 + 400.0 * min(1.0, max(0.0, (u - 0.2) / 0.8)) ** 1.5,
+          ease=moves.ease)
+    w.cue('jump', t=t_jump + 0.2, who=A.name)
+    w.cue('roar', t=t_jump + 0.15, dur=0.7, who=A.name, big=True)
+    D.add(t + 0.3, 'stalk', 0.9, to=(spot[0] - 6, spot[1]))
+    D.add(t + 1.2, 'crouch_look', 0.6, blend=0.1)
+    w.cue('fall_whistle', t=t + 0.9, dur=0.7, x=spot[0])
+    t_fall = t + 1.6
+    w.at(t_jump + 0.85, lambda world: world.hidden.__setitem__(A.name, True))
+    w.at(t_fall - 0.42, lambda world: world.hidden.__setitem__(A.name, False))
+    A.add(t_jump + 0.9, 'smash_land', 0.1, to=(spot[0] + 10, spot[1] - 4), face=-1, air=lambda u: 400.0)
+    A.add(t_fall - 0.42, 'smash_land', 0.42, face=-1, air=lambda u: 380.0 * (1 - u * u))
+    w.trail(A.name, t_fall - 0.3, t_fall)
+
+    def cave(world):
+        world.stage.cave_in(*hole, c.seed())
+        x0, x1, z0, z1 = hole
+        rng = _rng(c.seed())
+        cxh, czh = (x0 + x1) / 2, (z0 + z1) / 2
+        for k in range(70):
+            a = rng.uniform(0, 2 * math.pi)
+            world.stage.stamp(cxh + math.cos(a) * (x1 - x0) * rng.uniform(0.5, 0.62),
+                              czh + math.sin(a) * (z1 - z0) * rng.uniform(0.5, 0.7),
+                              fx.ASPHALT_C[rng.integers(1, 4)], r=rng.uniform(1.0, 2.4), seed=c.seed())
+        world.flash(world.t, 0.35, 0.1)
+        world.shake(world.t, 7.0, 0.9)
+        fx.burst(world, fx.ASPHALT, cxh, floor_y(z0 + 30), z0 + 30, 70, (40, 220), angle=-math.pi / 2, spread=1.6,
+                 life=(1.0, 2.0), size=(1, 2.6), seed=c.seed(), zs=1.2)
+        fx.burst(world, fx.DUST, cxh, floor_y(z0 + 30), z0 + 30, 70, (20, 110), life=(0.8, 1.8), size=(2.0, 3.6),
+                 seed=c.seed(), zs=1.4)
+        world.effects.append(fx.Ring(cxh, floor_y(spot[1]), world.t, 6, 140, 0.6, 'e0d8e8', squash=0.6, thick=3))
+        for lp in self.lamps[4:]:
+            lp.flicker_t = world.t
+        for car in self.cars:
+            if abs(car.x - cxh) < 260:
+                car.hop = (world.t + 0.05, 10.0)
+                car.alarm_t = world.t + 0.3
+        world.cue('cave_in', x=spot[0])
+        world.cue('hulk_land', x=spot[0])
+        world.cue('water_burst', t=world.t + 0.2, x=spot[0])
+        world.cue('water', t=world.t + 0.2, x=spot[0], dur=200.0, source='fall')
+    w.at(t_fall, cave)
+    w.mark('meteor', t_fall)
+    w.cam_fast.append((t_fall, t_fall + 1.6, 3.2))
+    w.slowmo(t_fall - 0.02, t_fall + 0.25, 0.3)
+    w.cue('slowmo', t=t_fall - 0.03)
+    xa, xb = hole[0] + 8, hole[1] - 8
+
+    def mains(world, tt, dt):
+        rng = _rng(int(tt * 1000) + 77)
+        for (px_, dirx) in ((xa, 1), (xb, -1)):
+            n = 5
+            z = 196.0
+            world.particles.spawn(fx.WATER, px_ + rng.uniform(-1, 1, n), z + rng.uniform(-2, 2, n),
+                                  floor_y(z) - 259.0 + rng.uniform(-2, 2, n), dirx * rng.uniform(25, 70, n),
+                                  rng.uniform(-6, 6, n), rng.uniform(-10, 30, n), rng.uniform(1.6, 2.2, n),
+                                  rng.uniform(1.0, 1.9, n), rng=rng)
+    w.effects.append(fx.Emitter(t_fall + 0.2, 900.0, mains))
+    t_dn = t_fall + 0.85
+    D.add(t_fall, 'tumble', 0.85, to=(spot[0] - 14, spot[1] + 4), ease=lambda u: u,
+          air=lambda u: -DS * u * u + 8 * u * (1 - u), blend=0.03)
+    A.add(t_fall, 'fall_in', 0.8, to=(spot[0] + 16, spot[1] - 6), ease=lambda u: u, air=lambda u: -DS * u * u, blend=0.05)
+    crater(c, spot[0] + 16, spot[1] - 6, t_fall + 0.8, 1.6, g=-DS)
+    A.add(t_fall + 0.8, 'land_rise', 0.7, blend=0.0, air=lambda u: -DS)
+    t_up = fall_lie_up(c, D, t_dn, -8, 0.35, 0.5, g=-DS)
+
+    def flicker(world):
+        for p in self.props:
+            if isinstance(p, pr.Fluo):
+                p.flicker_t = world.t
+        world.cue('sparks', x=spot[0], dur=1.5)
+    w.at(t_dn, flicker)
+    w.cue('music', t=t_dn, section='tension')
+    self.hole_spot = spot
+    c.area = 'subway'
+    w.mark('subway', t_dn)
+    guard(A, t_fall + 1.5)
+    return max(t_up, t_fall + 1.5) + 0.05
+
+
+def _leap_up_route(self, c, A, D, t, route):
+    """A takes D by the throat and leaps straight up through the hole back onto the street, then throws him down
+    onto the road beside it."""
+    import beats as B
+    from acts import guard, crater, floor_hit
+    from scene import arc
+    w = c.w
+    spot = getattr(self, 'hole_spot', (1420.0, 176.0))
+    t = B.engage(c, A, D, t, dist=B.fdist(A, D) * 0.8)
+    A.add(t, 'grab', 0.36, blend=0.05)
+    hold = t + 0.3
+    D.add(hold, 'held_throat', 4.0, attach=(A.name, 'FW', 'N', None), face=-A.facing_at(hold))
+    A.add(hold, 'hold_front', 0.5, blend=0.08)
+    w.at(hold, lambda world: world.cue('grab', who=A.name))
+    t = hold + 0.5
+    under = (spot[0] - 2, spot[1])
+    walk = max(0.5, min(1.4, abs(A.x_at(t) - under[0]) / 90.0))
+    A.add(t, 'hold_front_walk', walk, to=under, ease=lambda u: u)
+
+    def up_air(u):
+        if u <= 0.8:
+            return -DS + (DS + 90.0) * math.sin(u / 0.8 * math.pi * 0.5)
+        return 90.0 * (1 - ((u - 0.8) / 0.2) ** 2)
+    t_up = t + walk
+    A.add(t_up, 'leap', 1.25, to=(spot[0] - 30, 112.0), air=up_air, ease=moves.ease)     # lands clear of the hole
+    w.trail(A.name, t_up + 0.15, t_up + 0.9)
+    w.trail(D.name, t_up + 0.15, t_up + 0.9)
+    w.cue('jump', t=t_up + 0.2, who=A.name)
+    w.cue('roar', t=t_up + 0.1, dur=0.6, who=A.name, big=True)
+    w.cam_fast.append((t_up, t_up + 1.6, 3.2))
+    w.mark('leap_up', t_up + 0.6)
+    t_top = t_up + 1.25
+    land_c = (max(AREAS['fifth']['x'][0] + 20, spot[0] - 100), 118.0)
+    A.add(t_top, 'heave', 0.6, blend=0.04)
+    t_rl = t_top + 0.6 * moves.HEAVE_REL
+    y_rl = D.y_at(t_rl)
+    D.add(t_rl, 'thrown', 0.3, to=land_c, ease=lambda u: u, air=arc(3, y_rl, 0.0), blend=0.0, face=1)
+    t_sd = t_rl + 0.3
+    crater(c, land_c[0], land_c[1], t_sd, 1.8)
+
+    def slam_down(world):
+        f = world.f[D.name]
+        fx.burst(world, fx.BLOOD, land_c[0], floor_y(land_c[1]) - 6, land_c[1], 24, (60, 180), angle=-math.pi / 2,
+                 spread=1.1, life=(0.8, 1.6), size=(1, 2.4), seed=c.seed())
+        fx.burst(world, fx.WATER, land_c[0], floor_y(land_c[1]) - 2, land_c[1], 30, (60, 160), angle=-math.pi / 2,
+                 spread=1.3, life=(0.6, 1.2), size=(1, 1.8), seed=c.seed())
+        f.flash_t = world.t
+        world.flash(world.t, 0.2, 0.06)
+        world.cue('body_slam', x=land_c[0], power=2.0)
+        world.count['hits'] += 1
+        for part, kind in (('fleg_l', 'tear'), ('torso', 'cut')):
+            f.st.wounds.append({'part': part, 't': 0.5, 's': 0.0, 'r': 1.6, 'kind': kind, 'seed': c.seed()})
+    w.at(t_sd, slam_down)
+    w.slowmo(t_sd, t_sd + 0.014, 0.06, ramp=0.0)
+    w.mark('slam_down', t_sd)
+    D.add(t_sd, 'lie', 1.0, blend=0.0, air=lambda u: 0.0)
+    D.add(t_sd + 1.0, 'get_up_front', 0.9, blend=0.05)
+    guard(D, t_sd + 1.9)
+    A.add(t_top + 0.6, 'stalk', 1.2, to=(land_c[0] + 70, land_c[1] - 6))
+    guard(A, t_top + 1.8)
+    c.area = 'fifth'
+    return t_sd + 1.95
+
+
+def _set_piece_h2(self, c, A, D, t, piece):
+    """'third_rail': A catches D's kick by the ankle and slams him onto the live third rail (subway only)."""
+    import beats as B
+    from acts import whiff, guard
+    w = c.w
+    if piece != 'third_rail':
+        return t
+    rail_z = 186.0
+    t = B.engage(c, D, A, t)
+    thk = whiff(c, D.name, A.name, t, 'front_kick', 'gut')
+    A.add(thk - 0.28, 'grab', 0.34, blend=0.05)
+    hold = thk + 0.04
+    D.add(hold, 'held_ankle', 2.0, attach=(A.name, 'FW', 'FA', 'arm'), face=-A.facing_at(hold))
+    w.at(hold, lambda world: world.cue('grab', who=A.name))
+    A.add(hold, 'swing_slam', 1.0, face=A.facing_at(hold), blend=0.04)
+    w.cue('swing', t=hold + 0.25, who=A.name)
+    t_rail = hold + moves.SLAM_AT
+    from scene import joint_world
+    hx, hy = joint_world(A, t_rail, 'FW')
+
+    def rail(world):
+        f = world.f[D.name]
+        x, y = world.joints[D.name]['Hc']
+        fx.burst(world, fx.BLOOD, x, y, rail_z, 16, (60, 160), angle=-math.pi / 2, spread=1.0, life=(0.8, 1.4),
+                 size=(1, 2), seed=c.seed())
+        world.shake(world.t, 5.0, 0.4)
+        world.flash(world.t, 0.4, 0.08, 'c8e0ff')
+        f.st.elec = 1.0
+        world.cue('body_slam', x=hx, power=1.5)
+        world.cue('electrocute', x=hx, dur=1.3)
+        world.count['hits'] += 1
+    w.at(t_rail, rail)
+    D.add(t_rail, 'zapped', 1.3, to=(hx, rail_z - 2), blend=0.0, face=-1, air=lambda u: -DS)
+    rail_pt = (hx + 8, floor_y(rail_z) + DS - 1)
+    w.effects.append(fx.Arc(lambda world: world.joints[D.name]['C'], rail_pt, t_rail, t_rail + 1.3, c.seed(), width=2))
+    w.effects.append(fx.Arc(lambda world: world.joints[D.name]['Hc'], (hx - 10, floor_y(rail_z) + DS - 1), t_rail + 0.1,
+                            t_rail + 1.2, c.seed()))
+
+    def zap(world, tt, dt):
+        j = world.joints[D.name]
+        rng = _rng(int(tt * 1000) + 5)
+        for k in ('C', 'Hc', 'FW', 'NW', 'FA'):
+            fx.burst(world, fx.ELEC, j[k][0], j[k][1], world.f[D.name].z, 2, (40, 140), life=(0.15, 0.35),
+                     seed=int(rng.integers(1e9)))
+        world.shake(world.t, 1.2, 0.05)
+    w.effects.append(fx.Emitter(t_rail, t_rail + 1.3, zap))
+    w.mark('rail', t_rail)
+
+    def unzap(world):
+        f = world.f[D.name]
+        f.st.elec = 0.0
+        f.st.dirt = max(f.st.dirt, 0.6)
+        f.st.wounds.append({'part': 'torso', 't': 0.4, 's': 0.8, 'r': 1.6, 'kind': 'stain', 'seed': c.seed()})
+    w.at(t_rail + 1.3, unzap)
+    A.add(hold + 1.0, 'stalk', 0.6, dx=-12, blend=0.08)
+    guard(A, hold + 1.6)
+    D.add(t_rail + 1.3, 'roll', 0.45, to=(hx + 40 * (1 if hx < 1500 else -1), 160.0), blend=0.04, air=lambda u: -DS)
+    guard(D, t_rail + 1.75)
+    return t_rail + 1.8
+
+
+Stage.cave_in_route = _cave_in_route
+Stage.leap_up_route = _leap_up_route
+Stage.set_piece = _set_piece_h2
+
+
+def _wall_throw(self, c, A, D, t_go, route, pw, follow=True, walk_in=False):
+    """D, let go of (or blasted) at t_go, flies into the diner's side wall and through it into the next area (the hole
+    stays); a titan follows him straight through the wall, tearing the hole to full height (charging, or walking
+    through it roaring)."""
+    import beats as B
+    from acts import fall_lie_up, guard
+    from scene import arc
+    w = c.w
+    wall = self.walls[route['wall']]
+    dst = route['b']
+    ad = AREAS[dst]
+    s = 1 if ad['center'][0] > AREAS[route['a']]['center'][0] else -1
+    zc = max(95.0, min(150.0, D.z_at(t_go)))
+    wx = wall_x(wall.xb, zc) + WALL_T / 2
+    y0 = D.y_at(t_go)
+    dist = abs(wx - D.x_at(t_go))
+    dur = max(0.25, min(0.6, dist / 260.0))
+    D.add(t_go, 'thrown', dur, to=(wx - s * 2, zc), ease=lambda u: u, air=arc(4, y0, 26.0), blend=0.0, face=-s)
+    w.trail(D.name, t_go, t_go + dur)
+    w.cue('throw', t=t_go, who=A.name)
+    t_hit = t_go + dur
+
+    def breach(world):
+        wall.breach(zc, 30.0, 30 + 6 * pw, 24 + 6 * pw, c.seed())
+        x, y = wall_x(wall.xb, zc), floor_y(zc) - 30
+        fx.burst(world, fx.BRICK, x, y, zc, int(40 * pw), (60, 200), angle=0.0 if s > 0 else math.pi, spread=1.4,
+                 life=(0.9, 2.2), size=(1, 2.6), seed=c.seed(), zs=1.2, up=40)
+        fx.burst(world, fx.DUST, x, y, zc, int(44 * pw), (20, 90), life=(0.8, 1.8), size=(2.0, 3.4), seed=c.seed(),
+                 zs=1.4)
+        rng = _rng(c.seed())
+        for k in range(int(26 * pw)):
+            world.stage.stamp(x + s * rng.uniform(0, 30), zc + rng.uniform(-20, 20),
+                              fx.BRICK_C[rng.integers(1, 4)] * rng.uniform(0.7, 1.1), r=rng.uniform(1.0, 2.6),
+                              seed=c.seed())
+        world.shake(world.t, 5.0, 0.4)
+        world.flash(world.t, 0.18, 0.06)
+        world.cue('wall_break', x=x, power=round(pw + 0.5, 2))
+        world.cue('body_slam', x=x, power=1.2)
+        f = world.f[D.name]
+        fx.burst(world, fx.BLOOD, x, y, zc, 12, (40, 120), life=(0.8, 1.4), size=(1, 2), seed=c.seed())
+        world.count['hits'] += 1
+    w.at(t_hit, breach)
+    w.mark(f'wall_{route["wall"]}', t_hit)
+    w.cam_fast.append((t_go, t_hit + 1.2, 3.2))
+    land = (wx + s * (60 + 30 * pw), zc + 8)
+    D.add(t_hit, 'tumble', 0.45, to=land, ease=lambda u: u, air=arc(6, 26.0, 0.0), blend=0.02)
+    t_up = fall_lie_up(c, D, t_hit + 0.45, -8 * s, 0.5, 0.5, slow=True)
+    t_end = t_up
+    if follow:
+        ta = t_hit + 0.5
+        if A.heavy:
+            if walk_in:
+                A.add(ta, 'stalk', 1.1, to=(wx + s * 30, zc - 4), face=s)
+                tb = ta + 0.55
+            else:
+                A.add(ta, 'charge', 0.8, to=(wx + s * 40, zc - 4), ease=lambda u: u ** 1.3, face=s)
+                tb = ta + 0.58
+            w.trail(A.name, ta, tb + 0.2)
+            w.cue('roar', t=ta, dur=0.6, who=A.name, big=True)
+            w.at(ta, lambda world: setattr(world.f[A.name].st, 'roar', 0.7))
+            w.at(ta + 0.9, lambda world: setattr(world.f[A.name].st, 'roar', 0.0))
+
+            def tear(world):
+                wall.breach(zc, 45.0, 52.0, 70.0, c.seed())
+                x, y = wall_x(wall.xb, zc), floor_y(zc) - 45
+                fx.burst(world, fx.BRICK, x, y, zc, 60, (60, 220), angle=0.0 if s > 0 else math.pi, spread=1.5,
+                         life=(0.9, 2.2), size=(1, 2.8), seed=c.seed(), zs=1.3, up=50)
+                fx.burst(world, fx.DUST, x, y, zc, 60, (20, 100), life=(0.9, 2.0), size=(2.2, 3.6), seed=c.seed(),
+                         zs=1.5)
+                world.shake(world.t, 6.0, 0.5)
+                world.cue('wall_break', x=x, power=2.2)
+            w.at(tb, tear)
+            w.mark(f'tear_{route["wall"]}', tb)
+            guard(A, ta + (1.1 if walk_in else 0.8))
+            t_end = max(t_up, ta + (1.1 if walk_in else 0.8))
+        else:
+            A.add(ta, 'run', 0.6, to=(land[0] - s * (B.fdist(A, D) + 10), land[1]), face=s)
+            guard(A, ta + 0.6)
+            t_end = max(t_up, ta + 0.6)
+    c.area = dst
+    return t_end + 0.05
+
+
+Stage.wall_throw = _wall_throw

@@ -141,7 +141,8 @@ def run_beat(c, name, A, D, t, params=None):
 
 def pick_route(c, t, prefer=None):
     st = c.w.stage
-    routes = [r for r in st.ROUTES if r['a'] == c.area and st.route_open(r, t)]
+    top = max(f.tier for f in c.w.f.values())
+    routes = [r for r in st.ROUTES if r['a'] == c.area and st.route_open(r, t) and top >= r.get('needs_tier', 0)]
     if prefer:
         routes = [r for r in routes if r['b'] == prefer or r['how'] == prefer] or routes
     if not routes:
@@ -156,9 +157,13 @@ def travel(c, F1, F2, t, prefer=None, route=None):
     if route is None:
         return t
     how = route['how']
-    if how in ('knocked_off', 'thrown_through', 'smash_through'):
+    if how in ('cave_in', 'leap_up'):
+        A, D = (F1, F2) if F1.tier >= F2.tier else (F2, F1)       # the titan does it
+    elif how in ('knocked_off', 'thrown_through', 'smash_through'):
         A, D = (F1, F2) if F1.name == c.winner else (F2, F1)
-        if c.rng.uniform() < 0.35:
+        if F1.tier != F2.tier:
+            A, D = (F1, F2) if F1.tier > F2.tier else (F2, F1)  # the stronger one throws
+        elif c.rng.uniform() < 0.35:
             A, D = D, A
     else:
         A, D = (F2, F1) if F1.name == c.winner else (F1, F2)
@@ -309,7 +314,7 @@ def build_once(recipe, stage_mod, stage, specs, body=None):
             n_gen += 1
     # the finish
     t = B.engage(c, W_, L_, t) if finisher == 'knockout' else t
-    t_end = B.finish(c, W_, L_, t, finisher)
+    t_end = B.finish(c, W_, L_, t, finisher, recipe.get('universe'))
     c.log.append(f'FINISH {finisher} {t:.2f} .. {t_end:.2f}; video {video_time(world, t_end):.1f}s')
     world.end = t_end
     fill_idle(world, t_end)
@@ -412,7 +417,10 @@ def run_pin(c, p, A, D, t, W_, L_):
         if 'to' in params:
             rs = [r for r in c.w.stage.ROUTES if r['a'] == c.area and r['b'] == params['to'] and
                   c.w.stage.route_open(r, t)]
-            route = rs[0] if rs else None
+            route = dict(rs[0], **{k: v for k, v in params.items() if k != 'to'}) if rs else None
+            if route is None:
+                c.log.append(f'SKIP travel to {params["to"]} from {c.area}: no open route')
+                return t
         return travel(c, F1, F2, t, route=route)
     if name in ('stage_piece',):
         return c.w.stage.set_piece(c, F1, F2, t, params['piece'])

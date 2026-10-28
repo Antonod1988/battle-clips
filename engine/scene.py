@@ -25,10 +25,11 @@ VOID = -999.0
 
 
 class Action:
-    def __init__(self, t0, move, dur, x0, z0, dx, dz, ease, air, facing, blend, params, surf):
+    def __init__(self, t0, move, dur, x0, z0, dx, dz, ease, air, facing, blend, params, surf, attach=None):
         self.t0, self.move, self.dur, self.x0, self.z0 = t0, move, dur, x0, z0
         self.dx, self.dz, self.ease, self.air, self.facing = dx, dz, ease, air, facing
         self.blend, self.params, self.surf = blend, params, surf
+        self.attach = attach        # (holder, his joint, my joint, orient): hanging from the other's hand
 
     def u(self, t):
         return min(1.0, max(0.0, (t - self.t0) / self.dur)) if self.dur > 0 else 1.0
@@ -87,6 +88,8 @@ class Fighter:
         self.hide = []           # (t0, t1): not drawn (teleports)
         self.facing = facing
         self.heavy = self.tier >= 4 or spec.get('look', {}).get('build') in ('brute', 'heavy')
+        self.grow = []           # (t, K): he swells (a titan's rage)
+        self._att = (None, None)
 
     def other(self):
         return [f for n, f in self.world.f.items() if f is not self][0]
@@ -97,9 +100,19 @@ class Fighter:
             return moves.MOVES[self.stance.get(move, move)]
         return move
 
-    def add(self, t0, move, dur=1.0, dx=0.0, dz=0.0, ease=None, air=None, blend=0.06, face=None, to=None, **params):
+    def K_at(self, t):
+        k = self.K
+        for (t0, kk) in self.grow:
+            if t >= t0:
+                k = k + (kk - k) * min(1.0, (t - t0) / 0.6)
+        return k
+
+    def add(self, t0, move, dur=1.0, dx=0.0, dz=0.0, ease=None, air=None, blend=0.06, face=None, to=None,
+            attach=None, **params):
         """A move from t0: travel dx along the facing (forward +) and dz in depth, or `to`=(x, z) the end point.
-        Without `air` the fighter keeps to the surface he stands on at t0 (its slope or sag included)."""
+        Without `air` the fighter keeps to the surface he stands on at t0 (its slope or sag included).
+        attach=(holder, his joint, my joint, orient) hangs him from the other's hand (by the ankle: orient 'arm'
+        turns him along the holder's arm; by the throat: None)."""
         move = self.mv(move)
         x0, z0 = self.x_at(t0), self.z_at(t0)
         y0 = self.y_at(t0)
@@ -115,9 +128,10 @@ class Fighter:
             if dx < 0:
                 params['back'] = True
         surf = None
-        if air is None:
+        if air is None and attach is None:
             surf = self.world.stage.surface_fn(x0, z0, y0, t0)
-        self.actions.append(Action(t0, move, dur, x0, z0, dx, dz, ease or moves.ease, air, face, blend, params, surf))
+        self.actions.append(Action(t0, move, dur, x0, z0, dx, dz, ease or moves.ease, air, face, blend, params, surf,
+                                   attach))
         rate = moves.STEP_RATE.get(move)
         if rate and dur > 0.15 and math.hypot(dx, dz) > 2:
             self.world.cue('steps', t=t0, dur=dur, who=self.name, rate=rate, soft=move is moves.sidestep,
@@ -133,18 +147,46 @@ class Fighter:
                 break
         return cur, prev
 
+    def attached_root(self, a, t):
+        """Where a held fighter is: his joint (an ankle, the neck) sits in the holder's hand."""
+        if self._att[0] == (t, id(a)):
+            return self._att[1]
+        holder = self.world.f[a.attach[0]]
+        hj, mj = a.attach[1], a.attach[2]
+        hx, hy = joint_world(holder, t, hj)
+        p = self.pose_of(a, t)
+        j = rig.solve(p, self.look.dims)
+        fc = a.facing
+        K = self.K_at(t)
+        z = holder.z_at(t) + 2.0
+        rx = hx - fc * K * j[mj][0]
+        ry = hy - K * j[mj][1]
+        out = (rx, z, floor_y(z) - ry)
+        self._att = ((t, id(a)), out)
+        return out
+
+    def held_at(self, t):
+        a, _ = self.find(t)
+        return a is not None and a.attach is not None
+
     def x_at(self, t):
         a, _ = self.find(t)
+        if a is not None and a.attach:
+            return self.attached_root(a, t)[0]
         return self.x_init if a is None else a.x0 + a.facing * a.dx * a.ease(a.u(t))
 
     def z_at(self, t):
         a, _ = self.find(t)
+        if a is not None and a.attach:
+            return self.attached_root(a, t)[1]
         return self.z_init if a is None else a.z0 + a.dz * a.ease(a.u(t))
 
     def y_at(self, t):
         a, _ = self.find(t)
         if a is None:
             return self.world.stage.ground(self.x_init, self.z_init, 0.0, 999.0) if hasattr(self.world, 'stage') else 0.0
+        if a.attach:
+            return self.attached_root(a, t)[2]
         if a.air is not None:
             return a.air(a.u(t))
         return a.surf(a.x0 + a.facing * a.dx * a.ease(a.u(t)), a.z0 + a.dz * a.ease(a.u(t)))
@@ -189,6 +231,15 @@ class Fighter:
         p = a.move(a.u(t), t=t - a.t0, **a.params)
         if a.dx and a.move in moves.PLANTED:
             p = plant(dict(p), a, a.u(t))
+        if a.attach and a.attach[3] == 'arm':
+            holder = self.world.f[a.attach[0]]
+            hj = a.attach[1]
+            sx, sy = joint_world(holder, t, hj[0] + 'S')
+            hx, hy = joint_world(holder, t, hj)
+            ux, uy = hx - sx, hy - sy
+            L = math.hypot(ux, uy) + 1e-6
+            p = dict(p)
+            p['spin'] = math.atan2(ux / L * a.facing, -uy / L)
         return p
 
     def pose_at(self, t):
@@ -196,6 +247,8 @@ class Fighter:
         if a is None:
             return self.mv('guard')(0, t=t)
         p = self.pose_of(a, t)
+        if prev is not None and (a.attach or prev.attach):
+            return p
         if prev is not None and a.blend > 0 and t - a.t0 < a.blend:
             p = rig.lerp_pose(self.pose_of(prev, a.t0), p, moves.ease((t - a.t0) / a.blend))
         return p
@@ -203,7 +256,7 @@ class Fighter:
     def view_target(self, t):
         """Three-quarter facing: travelling or striking towards the camera turns the body front, away turns it back."""
         a, _ = self.find(t)
-        if a is None or a.dur <= 0:
+        if a is None or a.dur <= 0 or a.attach:
             return 0.0
         if a.move in (moves.flip, moves.back_flip, moves.roll, moves.tumble, moves.lie, moves.bounce, moves.spin_slash):
             return 0.0
@@ -217,6 +270,15 @@ class Fighter:
         if abs(k) < 0.3:
             return 0.0
         return max(-1.0, min(1.0, (k - 0.3 * (1 if k > 0 else -1)) / 0.5))
+
+
+def joint_world(f, t, name):
+    """A joint of a fighter in stage coordinates at scene time t (from his timeline, not the last solved frame)."""
+    p = f.pose_at(t)
+    j = rig.solve(p, f.look.dims)
+    K = f.K_at(t)
+    fc = f.facing_at(t)
+    return (f.x_at(t) + fc * K * j[name][0], floor_y(f.z_at(t)) - f.y_at(t) + K * j[name][1])
 
 
 class World:
@@ -332,7 +394,9 @@ class World:
 
     # ------------------------------------------------------------- stepping
     def solve(self, t):
-        for name, f in self.f.items():
+        order = sorted(self.f.items(), key=lambda kv: 1 if kv[1].held_at(t) else 0)
+        for name, f in order:
+            f._att = (None, None)
             p = f.pose_at(t)
             f.x, f.z, f.y = f.x_at(t), f.z_at(t), f.y_at(t)
             fc = f.facing_at(t)
@@ -340,7 +404,7 @@ class World:
             j = rig.solve(p, f.look.dims)
             sy = f.sq
             sx = 1.0 / math.sqrt(sy)
-            K = f.K
+            K = f.K_at(t)
             fore = 1.0 - 0.22 * abs(f.view)          # a three-quarter turn shortens the side view a little
             rx, ry = f.x, floor_y(f.z) - f.y
             out = {}
@@ -440,8 +504,10 @@ class World:
             target = 1.0 + min(0.16, abs(vy) / 420.0)
         elif mv is moves.dash or mv is moves.fire_dash:
             target = 0.88
-        hid = self.is_hidden(f.name, t)
+        hid = self.is_hidden(f.name, t) or f.held_at(t)
         heavy = 1.6 if f.heavy else 1.0
+        if f.held_at(t):
+            target = 1.0
         if lag > 2.0 and ag <= 0.5 and vy < -30 and not hid:
             self.cue('land', who=f.name, power=round(min(2.0, abs(vy) / 150.0) * heavy, 2))
             f.sv -= min(7.0, 2.5 + abs(vy) / 60.0)
@@ -515,7 +581,7 @@ class World:
             shadow(cv, f.x + ox, floor_y(f.z) - g + oy + 0.5, rx, rx * 0.32, 0.55 * k_)
         # depth-sorted: the stage's sprites, standing effects and the fighters
         items = [(z, 0, o) for (z, o) in st.sprites(t, self)]
-        items += [(f.z, 2, n) for n, f in self.f.items() if not self.is_hidden(n, t)]
+        items += [(f.z + (0.5 if f.held_at(t) else 0.0), 2, n) for n, f in self.f.items() if not self.is_hidden(n, t)]
         items += [(e.z + 0.2, 3, e) for e in self.effects if getattr(e, 'zsort', False) and e.alive(t)]
         for z, kind, o in sorted(items, key=lambda i: (i[0], i[1])):
             if kind == 0:

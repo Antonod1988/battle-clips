@@ -49,10 +49,15 @@ FIGHTER = {
         'leap': ['jump_kick', 'flip_kick'],
     },
     'weapons': [],
+    # a trained man against bigger foes (shared beats): the shield ringing off the scenery and back, flips and
+    # slides, springing off cars, kicking furniture, long combos, bracing behind the shield
     'powers': [
         {'beat': 'shield_throw', 'element': 'shield'},
         {'beat': 'shield_brace', 'element': 'shield', 'defence': True},
         {'beat': 'acrobat_dodge', 'element': 'body'},
+        {'beat': 'long_combo', 'element': 'body'},
+        {'beat': 'car_spring', 'element': 'body'},
+        {'beat': 'table_kick', 'element': 'body'},
     ],
     'signature': {'beat': 'shield_combo'},
     'breakout': 'strength',

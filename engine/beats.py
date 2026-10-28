@@ -215,8 +215,9 @@ def intro(c, A, D, t=0.0):
         w.shake(tt, 1.6, 0.15)
         w.cue('slam', t=tt, x=w.cam[0] + x, big=tt > 1.2)
     w.cue('music', t=0.0, section='intro')
-    tA = entrance(c, A, 2.9, A.spec.get('entrance', 'walk_in'))
-    tD = entrance(c, D, 3.2, D.spec.get('entrance', 'walk_in'))
+    ea, ed = A.spec.get('entrance', 'walk_in'), D.spec.get('entrance', 'walk_in')
+    tA = entrance(c, A, 0.9 if ea == 'meteor' else 2.9, ea)
+    tD = entrance(c, D, 0.9 if ed == 'meteor' else 3.2, ed)
     t_f = max(4.7, tA + 0.15, tD + 0.15)
     guard(A, tA)
     guard(D, tD)
@@ -268,6 +269,34 @@ def entrance(c, f, t, how):
         if el in ('ice', 'fire'):
             element_hands(c, f.name, t + 0.7, t + 1.4, el)
         return t + 1.42
+    if how == 'meteor':
+        # a titan drops out of the sky: the road craters, cars jump, windows burst; he rises and roars
+        f.hide.append((0.0, t - 0.45))
+        f.add(0.0, 'fall_in', t, to=(x, z), air=lambda u: 400.0)
+        f.add(t - 0.45, 'fall_in', 0.45, air=lambda u, g=g: g + 380.0 * (1 - u * u), face=f.face_init)
+        w.trail(f.name, t - 0.3, t)
+        crater(c, x, z, t, 2.4, g=g)
+
+        def impact(world):
+            st = world.stage
+            for car in getattr(st, 'cars', []):
+                if abs(car.x - x) < 300:
+                    car.hop = (world.t + 0.04, 9.0)
+                    car.alarm_t = world.t + 0.2
+            for gx in range(int(x) - 150, int(x) + 150, 28):
+                fx.burst(world, fx.GLASS, gx, floor_y(0) - 34, 3, 6, (40, 140), angle=math.pi / 2, spread=1.2,
+                         life=(0.8, 1.6), size=(1, 1.6), seed=c.seed(), zs=0.9, up=30)
+            world.cue('hulk_land', x=x, power=2.0)
+            world.cue('glass', x=x, power=1.5)
+            world.flash(world.t, 0.25, 0.08)
+        w.at(t, impact)
+        w.slowmo(t - 0.02, t + 0.2, 0.3)
+        f.add(t, 'land_rise', 0.8, face=f.face_init)
+        f.add(t + 0.8, 'roar', 1.1, face=f.face_init)
+        w.at(t + 1.05, lambda world: (setattr(world.f[f.name].st, 'roar', 1.0), world.cue('roar', who=f.name, dur=0.8,
+                                                                                          big=True)))
+        w.at(t + 1.8, lambda world: setattr(world.f[f.name].st, 'roar', 0.0))
+        return t + 1.9
     # walk in: from off to the side, guard up
     side = -f.face_init
     f.add(0.0, 'stalk', t + 0.8, to=(x, z), face=f.face_init)
@@ -469,7 +498,7 @@ def knock_into(c, A, D, t, kind=None):
     """A big blow throws D into something in the area (a brazier, a pillar, a car, a wall): it breaks."""
     rng = c.rng
     w = c.w
-    tg = c.target_for(D, t, kind, kinds=None if kind else KNOCK_KINDS)
+    tg = c.target_for(D, t, kind, kinds=None if kind else KNOCK_KINDS, maxd=520 if kind else 170)
     if tg is None:
         return exchange(c, A, D, t)
     # stand so the blow sends him at the target: A on the far side of D from it
@@ -1587,9 +1616,9 @@ def comeback(c, A, D, t):
 
 
 @beat('magic', 'opening', 'escalation', weight=2.0, needs=lambda c, A, D, t: has(A, 'shield_throw') and A.shield_at(t))
-def shield_throw(c, A, D, t):
-    """A throws his shield: it rings off something in the area (or the floor), strikes D's head and comes back to his
-    hand."""
+def shield_throw(c, A, D, t, bounces=None):
+    """A throws his shield: it rings off things in the area (a car, a wall, a sign; one or two), strikes D's head and
+    comes back to his hand. Things it rings off that can break do (a sign falls, a lamp over D drops on him)."""
     w = c.w
     rng = c.rng
     if gap(A, D, t) < 50:
@@ -1602,25 +1631,36 @@ def shield_throw(c, A, D, t):
     hx, hy = hand_pt(A, t_rel, 'f')
     g = w.stage.ground(A.x_at(t_rel), A.z_at(t_rel), t_rel, A.y_at(t_rel) + 2)
     p0 = (hx, A.z_at(t_rel), floor_y(A.z_at(t_rel)) - hy)
-    tg = c.target_for(D, t_rel, None, maxd=200, kinds=None, any_dir=True)
+    nb = bounces or (2 if c.rng.uniform() < 0.5 else 1)
     pts = [(t_rel, p0)]
     tt = t_rel
-    if tg is not None:
+    cur = p0
+    used = set()
+    drop_on = None
+    for bi in range(nb):
+        cands = [x for x in w.stage.targets(c.area, t_rel) if id(x) not in used and x.kind in
+                 ('car', 'window', 'facade', 'sign', 'lamp', 'pole', 'hydrant', 'pendant', 'fluo', 'column', 'beam',
+                  'pillar', 'brazier', 'gong') and 30 < abs(x.x - cur[0]) < 240]
+        if not cands:
+            break
+        tg = min(cands, key=lambda x: abs(abs(x.x - cur[0]) - 110) + (60 if x.kind in ('car', 'window') else 0) * 0)
+        used.add(id(tg))
         q = (tg.x, tg.z, tg.h * 0.6 + floor_at(c, tg.x, tg.z, t_rel))
-        tt += math.hypot(q[0] - p0[0], q[1] - p0[1]) / 380.0 + 0.05
+        tt += math.hypot(q[0] - cur[0], q[1] - cur[1]) / 380.0 + 0.05
         pts.append((tt, q))
-        t_ric = tt
+        cur = q
+        if tg.kind in ('pendant', 'fluo') and abs(tg.x - D.x_at(tt)) < 40:
+            drop_on = (tg, tt)
 
         def ric(world, tg=tg, q=q, tt=tt):
             world.cue('shield_ricochet', x=q[0])
             fx.burst(world, fx.SPARK, q[0], floor_y(q[1]) - q[2], q[1], 12, (40, 120), life=(0.15, 0.4), seed=c.seed())
             world.effects.append(fx.HitSpark(q[0], floor_y(q[1]) - q[2], tt, 7, 'block', c.seed()))
-            if tg.kind in ('lamp', 'car', 'window', 'table', 'brazier', 'hydrant'):
-                tg.smash(world, tt, 0.8, 1 if q[0] > world.f[A.name].x else -1, c.seed())
         w.at(tt, ric)
-    else:
-        t_ric = None
-    t_head = tt + 0.2 + (abs(D.x_at(tt) - (pts[-1][1][0])) / 420.0)
+        if tg.kind in ('lamp', 'car', 'window', 'table', 'brazier', 'hydrant', 'sign', 'pole', 'pendant', 'fluo'):
+            tg.smash(w, tt, 0.8, 1 if q[0] > A.x_at(tt) else -1, c.seed())
+        w.mark(f'ricochet_{tg.kind}', tt, key=False)
+    t_head = tt + 0.2 + (abs(D.x_at(tt) - (pts[-1][1][0] if not callable(pts[-1][1]) else D.x_at(tt))) / 420.0)
 
     def head_pt(world):
         j = world.joints[D.name]
@@ -1655,6 +1695,20 @@ def shield_throw(c, A, D, t):
     w.at(t_head, bonk)
     D.add(t_head, 'hit_head', 0.45, dx=-6 * power(A) / max(0.7, power(D) ** 0.5), ease=moves.out, blend=0.03)
     guard(D, t_head + 0.45)
+    if drop_on is not None:
+        # the lamp it cut down comes down on his head
+        t_d = drop_on[1] + 0.45
+
+        def lamp_on_head(world):
+            f = world.f[D.name]
+            j = world.joints[D.name]
+            world.effects.append(fx.HitSpark(j['Hc'][0], j['Hc'][1], world.t, 9, 'big', c.seed()))
+            f.flash_t = world.t
+            world.jolt(D.name, 5.0)
+            world.count['hits'] += 1
+            world.cue('hit', who=D.name, weight=2, limb='punch', blood=4)
+        w.at(t_d, lamp_on_head)
+        w.mark('lamp_on_head', t_d)
     A.add(t + 0.5, guard_move(A, t), t_back - t - 0.6)
     A.add(t_back - 0.15, 'shield_catch', 0.4)
     A.shields.append((t_back, True))
@@ -1729,9 +1783,20 @@ def acrobat_dodge(c, A, D, t):
 
 # ------------------------------------------------------------------ strength (the titans)
 @beat('magic', 'escalation', weight=1.6, needs=lambda c, A, D, t: has(A, 'shockwave'))
-def shockwave(c, A, D, t):
-    """A thunderclap: a white blast and rings; D is blown across the area, things nearby break."""
+def shockwave(c, A, D, t, through=None):
+    """A thunderclap: a white blast and rings in slow motion; windows burst, lamps and signs come down, cars jump,
+    furniture flies; D is blown across the area (through a wall into the next area if `through` names a route)."""
     w = c.w
+    if through is not None and hasattr(w.stage, 'wall_throw'):
+        wall = w.stage.walls[through['wall']]
+        zc = clamp_z(c, D.z_at(t), 6)
+        sgn = 1 if w.stage.AREAS[through['b']]['center'][0] > A.x_at(t) else -1
+        from city import wall_x
+        wx = wall_x(wall.xb, zc)
+        D.add(t, 'stalk', 0.6, to=(wx - sgn * 34, zc), face=-sgn)
+        A.add(t, 'stalk', 0.6, to=(wx - sgn * (34 + fdist(A, D) + 20), zc - 2), face=sgn)
+        guard(D, t + 0.6)
+        t += 0.65
     A.add(t, 'clap', 0.8)
     tc_ = t + 0.8 * moves.CLAP_AT
     j = A
@@ -1750,11 +1815,37 @@ def shockwave(c, A, D, t):
         world.f[D.name].flash_t = world.t
         world.jolt(D.name, 6.0)
         for tg in world.stage.targets(c.area, tc_):
-            if abs(tg.x - x) < 120:
+            if abs(tg.x - x) < 160 and tg.kind not in ('rail', 'facade'):
                 tg.smash(world, tc_ + abs(tg.x - x) / 400.0, 1.5, 1 if tg.x > x else -1, c.seed())
+        st = world.stage
+        if hasattr(st, 'darken'):
+            for gx in range(int(x) - 160, int(x) + 160, 28):
+                fx.burst(world, fx.GLASS, gx, floor_y(0) - 40, 3, 8, (60, 180), angle=math.pi / 2, spread=1.2,
+                         life=(1.0, 2.0), size=(1, 1.6), seed=c.seed(), zs=1.4, up=40)
+            st.darken(x, floor_y(0) - 60, 60, 0.55, 0.3, c.seed())
+        for tb in [p for p in getattr(st, 'props', []) if type(p).__name__ == 'Table' and not p.hidden]:
+            if abs(tb.x - x) < 200:
+                a, b = (tb.x, tb.z), (tb.x + (140 if tb.x > x else -140), tb.z + 6)
+                tb.path = (world.t, world.t + 0.7, lambda u, a=a, b=b: (a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u,
+                                                                          30 * u * (1 - u) * 4, 700 * u))
+        for pd in [p for p in getattr(st, 'props', []) if type(p).__name__ == 'Pendant']:
+            if abs(pd.x - x) < 200:
+                pd.swings.append((world.t, 0.9))
+                if pd.drop_t is None and abs(pd.x - x) < 120:
+                    pd.drop_t = world.t + 0.4
+        for car in getattr(st, 'cars', []):
+            if abs(car.x - x) < 260:
+                car.hop = (world.t + 0.05, 9.0)
+                car.alarm_t = world.t + 0.3
+        world.cue('glass', x=x, power=2.0)
     w.at(tc_, blast)
     w.slowmo(tc_, tc_ + 0.5, 0.35)
+    w.cue('slowmo', t=tc_ - 0.03)
     s = sd(A, D, tc_)
+    if through is not None and hasattr(w.stage, 'wall_throw'):
+        guard(A, t + 0.8)
+        w.mark('shockwave', tc_)
+        return w.stage.wall_throw(c, A, D, tc_ + 0.02, through, 1.4, follow=True, walk_in=True)
     to = (clamp_x(c, D.x_at(tc_) + s * 140, 6), D.z_at(tc_))
     tumble_to(c, D, tc_ + 0.05, to, 0.8, 24)
     t_up = fall_lie_up(c, D, tc_ + 0.85, -8, 0.4, 0.5, slow=True)
@@ -1771,11 +1862,40 @@ def leap_smash(c, A, D, t):
     A.add(t, 'leap', 0.6, air=arc(160, A.y_at(t), A.y_at(t) + 180), ease=lambda u: u)
     tl = t + 1.4
     x, z = D.x_at(tl), D.z_at(tl)
+    cars = [tg for tg in w.stage.targets(c.area, t) if tg.kind == 'car' and tg.ref.state != 'wreck' and
+            abs(tg.x - x) < 150]
+    if cars:
+        car_t = min(cars, key=lambda tg: abs(tg.x - x))
+        car_t.used += 1
+        x, z = car_t.x + 4, car_t.z + 2                  # he comes down on the car; D is beside it
     g = w.stage.ground(x, z, tl, D.y_at(tl) + 2)
     A.add(t + 0.6, 'smash_land', 0.8, to=(x - s * 6, z), air=lambda u, g=g: g + 180 * (1 - u) ** 2, ease=lambda u: u)
     D.add(t + 0.8, 'crouch_look', 0.5)
     crater(c, x, z, tl, 2.5 * power(A) / 1.8, g=g)
     w.cue('hulk_land', t=tl, x=x, power=2.0)
+
+    def quake(world):
+        st = world.stage
+        for car in getattr(st, 'cars', []):
+            d = abs(car.x - x) + abs(car.z - z) * 0.5
+            if d < 60 and car.state != 'wreck':
+                car.state = 'wreck'                       # crushed under the landing
+                car.alarm_t = world.t
+                world.cue('car_crash', x=car.x, power=2.0)
+                fx.burst(world, fx.GLASS, car.x, floor_y(car.z) - 12, car.z, 30, (40, 160), angle=-math.pi / 2,
+                         spread=1.3, life=(0.8, 1.6), size=(1, 1.6), seed=c.seed(), up=30)
+            elif d < 260:
+                car.hop = (world.t + 0.04, 8.0)
+                car.alarm_t = world.t + 0.2
+        for lp in getattr(st, 'lamps', []):
+            if abs(lp.x - x) < 300:
+                lp.flicker_t = world.t
+        if hasattr(st, 'darken'):
+            for gx in range(int(x) - 140, int(x) + 140, 30):
+                fx.burst(world, fx.GLASS, gx, floor_y(0) - 34, 3, 6, (40, 140), angle=math.pi / 2, spread=1.2,
+                         life=(0.8, 1.6), size=(1, 1.6), seed=c.seed(), zs=0.9, up=30)
+            world.cue('glass', x=x, power=1.5)
+    w.at(tl, quake)
 
     def blown(world):
         world.f[D.name].flash_t = world.t
@@ -1952,8 +2072,21 @@ def travel(c, A, D, t, route):
         w.mark('bridge' if route.get('via') == 'bridge' else dst, t + 1.3)
         return max(tt, td) + 0.15
     if how == 'smash_through':
-        # the stronger one throws the other through a wall into the next room (the breach stays)
+        # the stronger one throws the other through a wall into the next room (the breach stays): with an ankle swing
+        # or a thunderclap if he has them and the recipe asks (route 'grab' / 'blast'), else a big blow
+        if route.get('grab') and has(A, 'ankle_slam'):
+            t2 = ankle_slam(c, A, D, t, through=route)
+            c.area = route['b']
+            return t2
+        if route.get('blast') and has(A, 'shockwave'):
+            t2 = shockwave(c, A, D, t, through=route)
+            c.area = route['b']
+            return t2
         return w.stage.smash_through(c, A, D, t, route)
+    if how == 'cave_in':
+        return w.stage.cave_in_route(c, A, D, t, route)
+    if how == 'leap_up':
+        return w.stage.leap_up_route(c, A, D, t, route)
     return t
 
 
@@ -2150,8 +2283,11 @@ def leap_smash_climax(c, A, D, t):
 
 
 # ================================================================== the end
-def finish(c, A, D, t, finisher):
-    """The end: FINISH HIM (MK fatalities) and the finisher, or a knockout; then the win card."""
+def finish(c, A, D, t, finisher, universe=None):
+    """The end: FINISH HIM (MK fatalities) and the finisher, or a knockout or a titan's smash; then the win card.
+    Outside the MK universe (recipe 'universe') a fatality falls back to a knockout: no FINISH HIM, no FATALITY."""
+    if universe not in (None, 'mk') and finisher in ('fire_breath', 'ice_shatter'):
+        finisher = 'titan_smash' if A.tier >= 4 else 'knockout'
     fn = FINISHERS.get(finisher, knockout)
     return fn(c, A, D, t)
 
@@ -2409,3 +2545,715 @@ def knockout(c, A, D, t):
 FINISHERS = {'fire_breath': fire_breath, 'ice_shatter': ice_shatter, 'knockout': knockout}
 CLIMAXES = {'spear': spear, 'ice_spikes_launch': ice_spikes_launch, 'shield_combo': shield_combo,
             'leap_smash': leap_smash_climax, 'big_combo': big_combo}
+
+
+# ================================================================== HULK-2: a titan's kit and a trained man's answers
+# Shared beats: any fighter with these powers can use them (the titan's at tier 4-5: grabs, throws of cars and road
+# slabs, ground smashes, the rage; the trained man's: a long combo, springing off a car, kicking furniture, the shield
+# ricocheting round the scenery, a last stand). Grabs hang the held fighter from the holder's hand (scene attach).
+from scene import joint_world  # noqa: E402
+
+
+def titan(f):
+    return f.tier >= 4
+
+
+def props_of(c, cls_name):
+    return [p for p in getattr(c.w.stage, 'props', []) if type(p).__name__ == cls_name]
+
+
+def prop_on_hands(A, prop, t0, t1, up=1.0):
+    """A prop (a car, a slab) rides on A's raised hands from t0 to t1."""
+    def fn(u):
+        t = t0 + u * (t1 - t0)
+        a = joint_world(A, t, 'FW')
+        b = joint_world(A, t, 'NW')
+        z = A.z_at(t) + 1.0
+        return ((a[0] + b[0]) / 2, z, floor_y(z) - (a[1] + b[1]) / 2 + up, 4.0 * math.sin(t * 3.0))
+    prop.path = (t0, t1, fn)
+
+
+def prop_fly(prop, t0, t1, a, b, h0, h1, hump, deg0=0.0, deg1=0.0):
+    def fn(u):
+        return (a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, h0 + (h1 - h0) * u + 4 * hump * u * (1 - u),
+                deg0 + (deg1 - deg0) * u)
+    prop.path = (t0, t1, fn)
+
+
+def held_throw(c, A, D, t_go, to, dur=0.4, h=6.0, y1=None):
+    """Lets go of a held fighter: he flies to `to` (x, z)."""
+    w = c.w
+    y0 = D.y_at(t_go)
+    if y1 is None:
+        y1 = floor_at(c, to[0], to[1], t_go + dur)
+    D.add(t_go, 'thrown', dur, to=to, ease=lambda u: u, air=arc(h, y0, y1), blend=0.0, face=1 if to[0] > D.x_at(t_go) else -1)
+    w.trail(D.name, t_go, t_go + dur)
+    w.cue('throw', t=t_go, who=A.name)
+    w.cam_fast.append((t_go, t_go + dur + 0.8, 3.2))
+    return t_go + dur
+
+
+def slam_fx(c, x, z, g, power, blood_on=None, tile=False):
+    """A body slammed into the floor: a crater, blood, a boom."""
+    def ev(world):
+        fx.burst(world, fx.DUST, x, floor_y(z) - g - 2, z, int(20 * power), (20, 90), angle=-math.pi / 2, spread=1.5,
+                 life=(0.6, 1.4), size=(1.8, 3.0), seed=c.seed(), zs=1.0)
+        world.effects.append(fx.Ring(x, floor_y(z) - g, world.t, 4, 20 + 18 * power, 0.32, 'e0d8e8', squash=0.6, thick=2))
+        world.shake(world.t, 3.0 + 2.5 * power, 0.4)
+        if blood_on is not None:
+            f = world.f[blood_on]
+            j = world.joints[blood_on]
+            fx.burst(world, fx.BLOOD, j['Hc'][0], j['Hc'][1], f.z, 18, (60, 180), angle=-math.pi / 2, spread=1.1,
+                     life=(0.8, 1.6), size=(1, 2.4), seed=c.seed())
+            fx.burst(world, fx.GORE, j['C'][0], j['C'][1], f.z, 4, (50, 140), angle=-math.pi / 2, spread=0.8,
+                     life=(0.8, 1.4), size=(1, 2), seed=c.seed())
+            f.flash_t = world.t
+            world.jolt(blood_on, 6.0)
+            world.count['hits'] += 1
+        world.flash(world.t, 0.15, 0.06)
+        world.cue('body_slam', x=x, power=round(1.2 + 0.4 * power, 2))
+    return ev
+
+
+@beat('opening', 'magic', 'escalation', weight=1.6, needs=lambda c, A, D, t: has(A, 'ankle_slam') and not D.heavy)
+def ankle_slam(c, A, D, t, through=None):
+    """A catches D's kick by the ankle, slams him into the floor on one side, then the other (craters, blood, a torn
+    suit), and lets go at the top of the third swing: D flies far (through a wall into the next room if `through`
+    names a route, else into whatever stands behind)."""
+    w = c.w
+    rng = c.rng
+    t = engage(c, D, A, t)
+    th_k = whiff(c, D.name, A.name, t, 'roundhouse', 'chest')
+    A.add(th_k - 0.3, 'grab', 0.36, blend=0.05)
+    hold = th_k + 0.06
+
+    def caught(world):
+        world.shake(world.t, 2.0, 0.2)
+        world.flash(world.t, 0.12, 0.06)
+        world.cue('grab', who=A.name)
+    w.at(hold, caught)
+    w.mark('caught', hold)
+    face0 = A.facing_at(hold)
+    D.add(hold, 'held_ankle', 4.0, attach=(A.name, 'FW', 'FA', 'arm'), face=-face0)
+    A.add(hold, 'grab', 0.2, blend=0.0, face=face0)
+    g = floor_at(c, A.x_at(hold), A.z_at(hold), hold)
+    for k in range(2):
+        ts = hold + 0.2 + k * 1.0
+        A.add(ts, 'swing_slam', 1.0, face=face0 if k == 0 else -face0)
+        w.cue('swing', t=ts + 0.25, who=A.name)
+        t_sl = ts + moves.SLAM_AT
+        hx, hy = joint_world(A, t_sl, 'FW')
+        crater(c, hx, A.z_at(t_sl) + 4, t_sl, 1.4, g=g)
+        w.at(t_sl, slam_fx(c, hx, A.z_at(t_sl) + 4, g, 1.4, blood_on=D.name))
+
+        def tear(world, k=k):
+            f = world.f[D.name]
+            for part, kind in ((('torso', 'tear'), ('head', 'stain')) if k == 0 else (('fleg_u', 'tear'), ('narm_u', 'tear'))):
+                f.st.wounds.append(dict(wound(part, kind, 1.8, rng), seed=c.seed()))
+        w.at(t_sl, tear)
+        w.slowmo(t_sl, t_sl + 0.012, 0.06, ramp=0.0)
+    w.mark('slam', hold + 0.2 + moves.SLAM_AT)
+    ts = hold + 2.2
+    if through is not None and hasattr(w.stage, 'wall_throw'):
+        s = 1 if w.stage.AREAS[through['b']]['center'][0] > A.x_at(ts) else -1
+    else:
+        s = 1 if D.x_at(hold) > A.x_at(hold) else -1
+    A.add(ts, 'swing_slam', 1.0, face=s)
+    w.cue('swing', t=ts + 0.25, who=A.name)
+    t_go = ts + 0.44
+    if through is not None and hasattr(w.stage, 'wall_throw'):
+        return w.stage.wall_throw(c, A, D, t_go, through, power(A) * 1.2, follow=True)
+    tg = c.target_for(D, t_go, None, kinds=('car', 'window', 'facade', 'column', 'pillar', 'lamp', 'beam', 'brazier'),
+                      dirn=s, maxd=260)
+    if tg is not None:
+        to = (tg.x - s * 6, tg.z + 3)
+    else:
+        to = (clamp_x(c, A.x_at(t_go) + s * 150, 6), clamp_z(c, A.z_at(t_go) + 10, 6))
+    t_hit = held_throw(c, A, D, t_go, to, 0.45, 8)
+    if tg is not None:
+        tg.smash(w, t_hit, 2.0, s, c.seed())
+        w.mark(f'into_{tg.kind}', t_hit)
+    t_up = fall_lie_up(c, D, t_hit, -6 * s, 0.45, 0.5, slow=True)
+    A.add(ts + 1.0, 'roar', 0.9, blend=0.08)
+    w.at(ts + 1.25, lambda world: (setattr(world.f[A.name].st, 'roar', 0.8), world.cue('roar', who=A.name, dur=0.6)))
+    w.at(ts + 1.85, lambda world: setattr(world.f[A.name].st, 'roar', 0.0))
+    guard(A, ts + 1.9)
+    return max(t_up, ts + 1.9) + 0.05
+
+
+@beat('magic', 'escalation', weight=1.4, needs=lambda c, A, D, t: has(A, 'throat_slam') and not D.heavy)
+def throat_slam(c, A, D, t):
+    """A takes D by the throat and lifts him: two headbutts, then swings him down into the floor and stomps on him;
+    D rolls clear."""
+    w = c.w
+    rng = c.rng
+    t = engage(c, A, D, t, dist=fdist(A, D) * 0.85)
+    A.add(t, 'grab', 0.36, blend=0.05)
+    hold = t + 0.3
+    w.at(hold, lambda world: (world.cue('grab', who=A.name), world.shake(world.t, 1.5, 0.15)))
+    D.add(hold, 'held_throat', 3.0, attach=(A.name, 'FW', 'N', None), face=-A.facing_at(hold))
+    A.add(hold, 'hold_front', 0.4, blend=0.08)
+    t = hold + 0.4
+    for k in range(2):
+        A.add(t, 'headbutt', 0.42, blend=0.04)
+        th = t + 0.42 * moves.HEADBUTT_HIT
+
+        def butt(world, k=k):
+            f = world.f[D.name]
+            x, y = world.joints[D.name]['Hc']
+            world.effects.append(fx.HitSpark(x, y, world.t, 10, 'big', c.seed()))
+            fx.burst(world, fx.BLOOD, x, y, f.z, 14, (60, 170), angle=-math.pi / 2 - 0.4, spread=0.8, life=(0.8, 1.6),
+                     size=(1, 2.2), seed=c.seed())
+            f.flash_t = world.t
+            world.jolt(D.name, 6.0)
+            world.shake(world.t, 3.5, 0.3)
+            world.cue('hit', who=D.name, weight=3, limb='head', blood=14)
+            world.count['hits'] += 1
+            f.st.wounds.append(dict(wound('head', 'stain', 1.3, rng), seed=c.seed()))
+        w.at(th, butt)
+        w.slowmo(th, th + 0.012, 0.06, ramp=0.0)
+        t += 0.5
+    w.mark('headbutt', t - 0.5)
+    A.add(t, 'swing_slam', 0.9, blend=0.06)
+    D.add(t, 'held_ankle', 0.9 * moves.SLAM_AT, attach=(A.name, 'FW', 'N', 'arm'), face=-A.facing_at(t))
+    t_sl = t + 0.9 * moves.SLAM_AT
+    hx, hy = joint_world(A, t_sl, 'FW')
+    zsl = A.z_at(t_sl) + 4
+    g = floor_at(c, hx, zsl, t_sl)
+    crater(c, hx, zsl, t_sl, 1.5, g=g)
+    w.at(t_sl, slam_fx(c, hx, zsl, g, 1.5, blood_on=D.name))
+    w.slowmo(t_sl, t_sl + 0.014, 0.06, ramp=0.0)
+    D.add(t_sl, 'lie', 0.7, to=(hx, zsl), blend=0.0, face=-A.facing_at(t_sl), air=hold_y(g))
+    t = t + 0.9
+    th = strike(c, A.name, D.name, t, 'stomp', 'chest', react=None, blood=16, size=12, spark='big', shake=5.0,
+                wound={'part': 'torso', 't': 0.8, 's': 0.6, 'r': 1.8, 'kind': 'cut'})
+    crater(c, D.x_at(th), D.z_at(th), th, 0.8, g=g)
+    w.mark('stomp', th)
+    s = -A.facing_at(th)
+    D.add(th + 0.25, 'roll', 0.5, to=(clamp_x(c, D.x_at(th) + s * 50, 6), clamp_z(c, D.z_at(th) - 6, 6)), blend=0.04,
+          air=hold_y(g))
+    w.trail(D.name, th + 0.25, th + 0.75)
+    guard(D, th + 0.75)
+    guard(A, th + 0.5)
+    return th + 0.85
+
+
+@beat('magic', 'escalation', 'opening', weight=1.8, needs=lambda c, A, D, t: has(A, 'car_throw') and
+      any(x.kind == 'car' and x.ref.state == 'ok' for x in c.w.stage.targets(c.area, t)))
+def car_throw(c, A, D, t):
+    """A lifts a car over his head, carries it two steps and throws it: D somersaults over it and it smashes through
+    the building front behind him (the facade collapses), lands on its roof and burns to the end."""
+    w = c.w
+    cars = [x for x in w.stage.targets(c.area, t) if x.kind == 'car' and x.ref.state == 'ok']
+    tg = min(cars, key=lambda x: abs(x.x - A.x_at(t)))
+    car = tg.ref
+    tg.used += 1
+    side = 1 if car.x > A.x_at(t) else -1
+    walk = max(0.4, min(1.2, abs(car.x - A.x_at(t)) / 120.0))
+    A.add(t, 'stalk', walk, to=(car.x - side * 4, car.z + 18))
+    t_lift = t + walk
+    A.add(t_lift, 'lift', 0.9)
+    prop_on_hands(A, car, t_lift + 0.5, t_lift + 3.0)
+    w.at(t_lift + 0.5, lambda world: world.cue('car_lift', x=car.x))
+    s = sd(A, D, t_lift + 0.9)
+    A.add(t_lift + 0.9, 'hold_up_walk', 0.7, dx=22, ease=lambda u: u, face=s)
+    t_throw = t_lift + 1.6
+    A.add(t_throw, 'heave', 0.7, face=s)
+    t_rel = t_throw + 0.7 * moves.HEAVE_REL
+    fac = [x for x in w.stage.targets(c.area, t_rel) if x.kind in ('facade', 'window')]
+    dx_ = D.x_at(t_rel)
+    if fac:
+        f_t = min(fac, key=lambda x: abs(x.x - dx_) + (0 if (x.x - A.x_at(t_rel)) * s > 0 else 400))
+        target = (f_t.x, 2.0)
+    else:
+        f_t = None
+        target = (clamp_x(c, dx_ + s * 60, 0), 4.0)
+    t_wall = t_rel + 0.55
+    w.mark('car_throw', t_rel)
+
+    def release(world):
+        x, z, h, deg = car.place(world.t)
+        prop_fly(car, world.t, t_wall, (x, z), target, h, 20.0, 12.0, 0.0, 200.0)
+        world.cue('car_fly', t=world.t, dur=t_wall - world.t, x=x, to_x=target[0])
+    w.at(t_rel, release)
+    w.trail(A.name, t_throw + 0.2, t_throw + 0.4)
+    agile = not D.heavy
+    if agile:
+        D.add(t_rel - 0.2, 'flip', 0.62, to=(clamp_x(c, D.x_at(t_rel) - s * 20, 6), clamp_z(c, D.z_at(t_rel) + 16, 6)),
+              air=arc(30 * leap_k(D) + 10, D.y_at(t_rel), D.y_at(t_rel)), blend=0.04)
+        w.trail(D.name, t_rel - 0.1, t_rel + 0.3)
+        guard(D, t_rel + 0.45)
+
+    def crash(world):
+        car.state = 'wreck'
+        world.flash(world.t, 0.2, 0.08)
+        world.cue('car_crash', x=target[0], power=2.0)
+        prop_fly(car, world.t, world.t + 0.35, (target[0], 4.0), (target[0] - 4, 12.0), 20.0, 0.0, 4.0, 200.0, 180.0)
+    w.at(t_wall, crash)
+    if f_t is not None:
+        f_t.smash(w, t_wall, 1.8, s, c.seed())
+    w.mark('car_wall', t_wall)
+
+    def car_down(world):
+        car.state = 'flipped'
+        car.deg = 0.0
+        car.burn_t = world.t
+        world.shake(world.t, 3.0, 0.3)
+        world.cue('car_hit', x=car.x, power=1.5)
+        world.cue('fire', x=car.x, dur=60.0)
+    w.at(t_wall + 0.35, car_down)
+
+    def burn(world, tt, dt):
+        rng = np.random.default_rng(int(tt * 1000) + 3)
+        x, z = car.x, car.z
+        for _ in range(2):
+            world.particles.spawn(fx.FLAME, [x + rng.uniform(-18, 18)], [z + rng.uniform(-2, 2)], [rng.uniform(4, 14)],
+                                  [rng.uniform(-6, 6)], [0.0], [rng.uniform(20, 40)], [rng.uniform(0.25, 0.5)],
+                                  [rng.uniform(0.9, 1.8)], rng=rng)
+        if rng.uniform() < 0.35:
+            world.particles.spawn(fx.SMOKE, [x + rng.uniform(-10, 10)], [z], [16.0], [3.0], [0.0], [24.0], [1.8], [1.8],
+                                  rng=rng)
+    w.effects.append(fx.Emitter(t_wall + 0.35, 900.0, burn))
+    guard(A, t_throw + 0.7)
+    return t_wall + 0.6
+
+
+@beat('magic', 'escalation', weight=1.4, needs=lambda c, A, D, t: has(A, 'chunk_throw'))
+def chunk_throw(c, A, D, t):
+    """A rips a slab out of the floor and throws it: it shatters on D's shield (D skids back), or D dodges it and it
+    bursts on the floor."""
+    import city_props as pr
+    w = c.w
+    s = sd(A, D, t)
+    x0, z0 = A.x_at(t) + 12 * s, A.z_at(t) + 2
+    slab = pr.Chunk(x0, z0, 34, 12, c.seed())
+    w.stage.props.append(slab)
+    A.add(t, 'lift', 0.9)
+    t_rip = t + 0.45
+    g = floor_at(c, x0, z0, t)
+
+    def rip(world):
+        slab.hidden = False
+        if hasattr(world.stage, 'crater'):
+            world.stage.crater(x0, z0, 14, c.seed(), h=g)
+        fx.burst(world, fx.ASPHALT, x0, floor_y(z0) - g - 2, z0, 22, (40, 120), angle=-math.pi / 2, spread=1.2,
+                 life=(0.8, 1.6), size=(1, 2.2), seed=c.seed())
+        world.shake(world.t, 3.0, 0.3)
+        world.cue('rip_road', x=x0)
+    w.at(t_rip, rip)
+    prop_on_hands(A, slab, t_rip, t + 1.6)
+    A.add(t + 0.9, 'hold_up', 0.7)
+    t_th = t + 1.6
+    A.add(t_th, 'heave', 0.7, face=s)
+    t_rel = t_th + 0.7 * moves.HEAVE_REL
+    t_imp = t_rel + 0.3
+    shield = D.look.gear.get('shield') and D.shield_at(t_imp)
+    tx, ty = world_point(D, t_imp, 'chest')
+    tz = D.z_at(t_imp)
+
+    def throw_(world):
+        x, z, h, _ = slab.place(world.t)
+        prop_fly(slab, world.t, t_imp, (x, z), (tx, tz), h, floor_y(tz) - ty, 5.0, 0.0, 400.0)
+        world.cue('whoosh', who=A.name, speed=0.8, limb='punch')
+    w.at(t_rel, throw_)
+    w.mark('slab', t_imp)
+    if shield:
+        D.add(t_imp - 0.12, 'shield_block', 0.5, dx=-22, ease=moves.out, blend=0.04)
+        guard(D, t_imp + 0.38)
+
+        def hit(world):
+            slab.hidden = True
+            x, y = world_point(world.f[D.name], world.t, 'chest')
+            world.effects.append(fx.HitSpark(x, y, world.t, 12, 'block', c.seed()))
+            fx.burst(world, fx.ASPHALT, x, y, tz, 50, (60, 200), angle=-math.pi / 2, spread=2.2, life=(0.8, 1.8),
+                     size=(1, 2.6), seed=c.seed(), zs=1.0)
+            fx.burst(world, fx.DUST, x, y, tz, 24, (20, 80), life=(0.6, 1.2), size=(1.8, 3.0), seed=c.seed())
+            world.effects.append(fx.Ring(x, y, world.t, 3, 30, 0.3, 'c8e0ff', thick=2))
+            world.shake(world.t, 5.0, 0.4)
+            world.cue('shield_block', who=D.name, weight=3, big=True)
+            world.cue('stone_crash', x=x, power=1.6)
+            world.count['blocks'] += 1
+        w.at(t_imp, hit)
+    else:
+        D.add(t_imp - 0.25, 'flip', 0.55, dx=-26, air=arc(26 * leap_k(D), D.y_at(t_imp), D.y_at(t_imp)))
+        guard(D, t_imp + 0.32)
+
+        def burst_(world):
+            slab.hidden = True
+            fx.burst(world, fx.ASPHALT, tx, floor_y(tz) - 2, tz, 40, (60, 200), angle=-math.pi / 2, spread=1.6,
+                     life=(0.8, 1.6), size=(1, 2.4), seed=c.seed())
+            world.shake(world.t, 4.0, 0.3)
+            world.cue('stone_crash', x=tx, power=1.6)
+        w.at(t_imp, burst_)
+    guard(A, t_th + 0.7)
+    return t_imp + 0.5
+
+
+@beat('magic', 'escalation', weight=1.4, needs=lambda c, A, D, t: has(A, 'ground_smash'))
+def ground_smash(c, A, D, t):
+    """Both fists into the floor where D stood: D rolls clear (or is bounced off his feet); the floor craters, cracks
+    run out, things nearby jump; furniture in the way breaks."""
+    w = c.w
+    t = engage(c, A, D, t, dist=fdist(A, D) * 1.1)
+    A.add(t, 'double_fist', 0.64)
+    th = t + 0.64 * moves.DFIST_HIT
+    s = sd(A, D, th)
+    x, z = A.x_at(th) + s * 20 * A.K_at(th), D.z_at(th)
+    g = floor_at(c, x, z, th)
+    crater(c, x, z, th, 2.2 * power(A) / 1.4, g=g)
+    w.at(th, slam_fx(c, x, z, g, 1.8))
+    w.slowmo(th, th + 0.016, 0.06, ramp=0.0)
+    for tg in w.stage.targets(c.area, th):
+        if tg.kind in ('counter', 'table') and abs(tg.x - x) < 70:
+            tg.smash(w, th, 2.0, s, c.seed())
+    if not D.heavy:
+        D.add(th - 0.25, 'roll' if D.tier <= 2 else 'back_flip', 0.5,
+              to=(clamp_x(c, D.x_at(th) + s * 50, 6), clamp_z(c, D.z_at(th) + 12, 6)), air=hold_y(g) if D.tier <= 2
+              else arc(18, g, g))
+        guard(D, th + 0.3)
+    w.mark('ground_smash', th)
+    guard(A, t + 0.64)
+    return th + 0.55
+
+
+@beat('magic', 'escalation', weight=1.0, needs=lambda c, A, D, t: has(A, 'rage'))
+def rage(c, A, D, t):
+    """A titan has had enough: a roar that blasts dust off him, the eyes glow, the veins stand out, he swells."""
+    w = c.w
+    A.add(t, 'roar', 1.0, blend=0.06)
+    w.at(t + 0.25, lambda world: (setattr(world.f[A.name].st, 'roar', 1.0), setattr(world.f[A.name].st, 'anger', 1.0)))
+    w.at(t + 0.85, lambda world: setattr(world.f[A.name].st, 'roar', 0.0))
+    A.grow.append((t + 0.3, A.K * 1.12))
+    w.shake(t + 0.25, 3.0, 0.8)
+    w.cue('roar', t=t + 0.25, dur=0.8, who=A.name, big=True)
+
+    def blast(world, tt, dt):
+        j = world.joints[A.name]
+        f = world.f[A.name]
+        fx.burst(world, fx.DUST, j['C'][0], j['C'][1], f.z, 4, (40, 120), life=(0.4, 0.8), size=(1.5, 2.5),
+                 seed=int(tt * 1000) + 1)
+    w.effects.append(fx.Emitter(t + 0.3, t + 0.9, blast))
+    D.add(t + 0.3, 'stalk', 0.6, dx=-16)
+    guard(D, t + 0.9)
+    w.mark('rage', t + 0.3)
+    return t + 1.05
+
+
+@beat('opening', 'escalation', weight=1.4, needs=lambda c, A, D, t: has(A, 'charge') and not D.heavy and
+      area(c).get('size') != 'narrow')
+def charge_trip(c, A, D, t):
+    """A charges; D slides between his legs and kicks his shin as he passes; A stumbles on into what stands behind
+    D (a lamp post comes down, a car caves in) and roars."""
+    w = c.w
+    s = sd(A, D, t)
+    if gap(A, D, t) < 90:
+        A.add(t, 'stalk', 0.5, to=(clamp_x(c, D.x_at(t) - s * 100, 6), D.z_at(t)), face=s)
+        guard(A, t + 0.5)
+        t += 0.5
+        s = sd(A, D, t)
+    tg = c.target_for(D, t, None, kinds=('lamp', 'car', 'sign', 'column', 'pillar', 'brazier', 'beam'), dirn=s, maxd=220)
+    end = (tg.x - s * 10, tg.z + 4) if tg else (clamp_x(c, D.x_at(t) + s * 90, 6), D.z_at(t))
+    A.add(t, 'charge', 0.62, to=(D.x_at(t) + s * 30, D.z_at(t)), ease=lambda u: u)
+    w.trail(A.name, t, t + 0.62)
+    w.cue('roar', t=t, dur=0.5, who=A.name)
+    D.add(t + 0.18, 'base_slide', 0.5, to=(D.x_at(t) - s * 70, D.z_at(t) + 4), ease=moves.out, blend=0.04)
+    w.trail(D.name, t + 0.18, t + 0.68)
+
+    def shin(world):
+        f = world.f[A.name]
+        world.effects.append(fx.HitSpark(f.x, floor_y(f.z) - f.y - 10, world.t, 8, 'hit', c.seed()))
+        world.shake(world.t, 2.0, 0.2)
+        world.cue('hit', x=f.x, weight=2, limb='kick', blood=0)
+        world.count['hits'] += 1
+        f.flash_t = world.t
+    w.at(t + 0.42, shin)
+    t_trip = t + 0.62
+    A.add(t_trip, 'hulk_reel' if A.heavy else 'hit_body', 0.36, to=end, ease=moves.out, blend=0.04)
+    if tg:
+        tg.smash(w, t_trip + 0.2, 1.6, s, c.seed())
+        w.mark(f'trip_{tg.kind}', t_trip + 0.2)
+    A.add(t_trip + 0.36, 'roar', 0.9, blend=0.08)
+    w.at(t_trip + 0.55, lambda world: (setattr(world.f[A.name].st, 'roar', 0.8), world.cue('roar', who=A.name, dur=0.6)))
+    w.at(t_trip + 1.1, lambda world: setattr(world.f[A.name].st, 'roar', 0.0))
+    guard(A, t_trip + 1.26)
+    guard(D, t + 0.7)
+    return t_trip + 1.3
+
+
+@beat('opening', 'magic', 'escalation', weight=3.0, needs=lambda c, A, D, t: has(A, 'long_combo'))
+def long_combo(c, A, D, t, n=None):
+    """A trained fighter's long string on a bigger foe: seven to nine blows (the shield, fists, knees, kicks), a jump
+    into an air kick and an air punch, the shield's rim up under the chin; the big one reels."""
+    w = c.w
+    rng = c.rng
+    t = ensure_room(c, A, D, t, 70)
+    t = engage(c, A, D, t)
+    n = n or int(rng.integers(5, 8))
+    kit = A.spec['strikes']
+    seq = []
+    for i in range(n):
+        seq.append(choose_blow(c, A, 'light' if i % 3 != 2 else 'heavy'))
+    for nm in seq:
+        where = WHERE.get(nm, 'head')
+        if D.heavy and where == 'head' and nm in ('jab', 'cross', 'hook'):
+            where = 'chest'                  # a man punches a giant in the body
+        strike(c, A.name, D.name, t, nm, where, knock=2.5, size=8, blood=4,
+               react=REACT.get(where, 'hit_head'), rdur=0.3, wound=wound('torso', 'stain', 1.4, rng))
+        t += DUR[nm] * 0.8
+    if kit['air']:
+        g = floor_at(c, A.x_at(t), A.z_at(t), t)
+        A.add(t, 'jump', 0.22, air=arc(12, g, g + 16), blend=0.04)
+        t2 = strike(c, A.name, D.name, t + 0.18, 'air_kick' if 'air_kick' in kit['air'] else kit['air'][0], 'head',
+                    react='hit_head', knock=4, blood=6, settle=False, land=g + 8)
+        t3 = strike(c, A.name, D.name, t + 0.18 + DUR['air_kick'], 'air_punch' if 'air_punch' in kit['air'] else kit['air'][0],
+                    'head', react='hit_head', knock=3, blood=7, settle=False, land=g, wound=wound('head', 'stain', 1.0, rng))
+        t = t + 0.18 + DUR['air_kick'] + DUR['air_punch']
+        guard(A, t)
+    lau = choose_blow(c, A, 'launcher')
+    th = strike(c, A.name, D.name, t + 0.1, lau, 'chin', react='hulk_reel' if D.heavy else 'hit_head', rdur=0.6,
+                knock=12, blood=12, size=11, spark='big', shake=4.0, flash=0.12)
+    drip(c, D.name, th, 300.0, 1.3, 'mouth')
+    w.mark('combo', th)
+    return th + 0.7
+
+
+@beat('opening', 'escalation', weight=1.6, needs=lambda c, A, D, t: has(A, 'car_spring') and
+      any(x.kind == 'car' and x.ref.state in ('ok', 'dent') for x in c.w.stage.targets(c.area, t)))
+def car_spring(c, A, D, t):
+    """A runs up onto a car's roof (it dents) and springs off it at D: a flying kick, a punch and an axe kick in the
+    air."""
+    w = c.w
+    rng = c.rng
+    cars = [x for x in w.stage.targets(c.area, t) if x.kind == 'car' and x.ref.state in ('ok', 'dent')]
+    tg = min(cars, key=lambda x: abs(x.x - A.x_at(t)) + abs(x.x - D.x_at(t)))
+    car = tg.ref
+    run = max(0.35, min(1.0, abs(car.x - A.x_at(t)) / 140.0))
+    A.add(t, 'run', run, to=(car.x, car.z - 2))
+    t += run
+    A.add(t, 'jump', 0.3, to=(car.x, car.z), air=arc(10, 0.0, 17.0))
+
+    def dent(world):
+        car.state = 'dent' if car.state == 'ok' else 'wreck'
+        car.alarm_t = world.t
+        world.cue('car_hit', x=car.x, power=0.8)
+        world.shake(world.t, 1.5, 0.15)
+    w.at(t + 0.3, dent)
+    t += 0.35
+    s = sd(A, D, t)
+    th = strike(c, A.name, D.name, t, 'jump_kick', 'head', react='hulk_reel' if D.heavy else 'hit_head', rdur=0.4,
+                knock=6, blood=8, size=10, spark='big', shake=2.5, settle=False, land=0.0,
+                wound=wound('head', 'stain', 1.2, rng))
+    t2 = strike(c, A.name, D.name, th + 0.05, 'air_punch', 'head', react='hit_head', knock=3, blood=6, settle=False,
+                land=0.0)
+    t3 = strike(c, A.name, D.name, t2 + 0.05, 'axe_kick', 'head', react='hit_head', rdur=0.45, knock=8, blood=10,
+                size=10, spark='big', shake=3.0, land=0.0)
+    w.mark('spring_kick', th)
+    guard(A, t2 + 0.05 + DUR['axe_kick'])
+    return t2 + 0.05 + DUR['axe_kick'] + 0.3
+
+
+@beat('magic', weight=1.4, needs=lambda c, A, D, t: has(A, 'table_kick') and
+      any(x.kind == 'table' for x in c.w.stage.targets(c.area, t)))
+def table_kick(c, A, D, t):
+    """A kicks a table into D: it spins across the floor and shatters on him."""
+    w = c.w
+    tbs = [x for x in w.stage.targets(c.area, t) if x.kind == 'table']
+    tg = min(tbs, key=lambda x: abs(x.x - A.x_at(t)))
+    tb = tg.ref
+    s = 1 if D.x_at(t) > tb.x else -1
+    A.add(t, 'stalk', 0.5, to=(tb.x - s * 14, tb.z + 2), face=s)
+    t += 0.5
+    A.add(t, 'front_kick', 0.42, face=s)
+    t_k = t + 0.42 * 0.45
+    t_hit = t_k + 0.35
+
+    def kick(world):
+        a = (tb.x, tb.z)
+        b = (world.f[D.name].x - s * 6, world.f[D.name].z)
+        tb.path = (world.t, t_hit, lambda u, a=a, b=b: (a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u,
+                                                         10 * u * (1 - u) * 4, 720 * u))
+        world.cue('whoosh', who=A.name, speed=1.2, limb='kick')
+    w.at(t_k, kick)
+    tg.smash(w, t_hit, 1.0, s, c.seed())
+
+    def hit(world):
+        f = world.f[D.name]
+        j = world.joints[D.name]
+        world.effects.append(fx.HitSpark(j['C'][0], j['C'][1], world.t, 9, 'big', c.seed()))
+        f.flash_t = world.t
+        world.jolt(D.name, 5.0)
+        world.count['hits'] += 1
+        world.cue('hit', who=D.name, weight=2, limb='kick', blood=0)
+    w.at(t_hit, hit)
+    D.add(t_hit, 'hulk_hit' if D.heavy else 'hit_body', 0.45, dx=-6, ease=moves.out, blend=0.03)
+    guard(D, t_hit + 0.45)
+    w.mark('table', t_hit)
+    return t_hit + 0.5
+
+
+@beat('climax', weight=0.0, pool=False)
+def last_stand(c, A, D, t):
+    """The weaker one's last stand: his shield sent round the scenery into the giant's head, then a leaping kick to
+    the face in slow motion."""
+    w = c.w
+    if has(A, 'shield_throw') and A.shield_at(t):
+        t = shield_throw(c, A, D, t, bounces=2)
+    s = sd(A, D, t)
+    dash(c, A, t, (D.x_at(t + 0.3) - s * 64, D.z_at(t + 0.3)), 0.24)
+    t += 0.26
+    th = strike(c, A.name, D.name, t, 'jump_kick', 'head', react='hulk_reel' if D.heavy else 'hit_head', rdur=0.7,
+                knock=10, blood=16, size=14, spark='big', shake=5.5, flash=0.25,
+                wound={'part': 'head', 't': 1.4, 's': 3.0, 'r': 1.6, 'kind': 'cut'})
+    w.slowmo(th - 0.06, th + 0.3, 0.25)
+    w.cue('slowmo', t=th - 0.07)
+    w.mark('last_kick', th)
+    return th + 0.75
+
+
+def off_hole(c, x, z, margin=12.0):
+    """A floor point moved off any hole the stage has (or will have: a caved-in road), to the near edge's front."""
+    for (x0, x1, z0, z1) in getattr(c.w.stage, 'planned_holes', []):
+        if x0 - margin < x < x1 + margin and z0 - margin < z < z1 + 40:
+            return x, z0 - margin - 4
+    return x, z
+
+
+def titan_smash(c, A, D, t):
+    """The Marvel ending for a titan: his line (HULK SMASH!), the haymaker on the raised shield in slow motion, the
+    street blown apart (every window, the lamps dying, the cars hopping), D blasted down the street into a car, the
+    shield rolling away; D tries to rise and falls back; the roar; the win card and the end card."""
+    w = c.w
+    line = (A.spec.get('signature') or {}).get('line') or 'SMASH!'
+    t = engage(c, A, D, t, dist=fdist(A, D) * 1.15)
+    A.add(t, guard_move(A, t), 0.25, blend=0.1)
+    w.at(t + 0.05, lambda world: setattr(world.f[A.name].st, 'roar', 0.6))
+    w.words.append(T.Word(line, t + 0.1, t + 1.7, 240, 50, 'big', TITLE_COLORS.get(A.spec['title_colors'], T.GOLD),
+                          drop=12))
+    w.cue('say', t=t + 0.1, text=line, voice=A.spec.get('voice', 'announcer'))
+    w.shake(t + 0.1, 3.0, 0.3)
+    t += 0.25
+    shield = D.look.gear.get('shield') and D.shield_at(t)
+    if shield:
+        D.add(t + 0.2, 'shield_brace', 0.5, blend=0.06)
+    th = strike(c, A.name, D.name, t, 'haymaker' if 'haymaker' in A.spec['strikes']['heavy'] else choose_blow(c, A, 'heavy'),
+                'chest', react=None, blood=0 if shield else 18, size=18, spark='big', shake=8.0, flash=0.6)
+    w.slowmo(th - 0.04, th + 0.5, 0.16)
+    w.cue('slowmo', t=th - 0.05)
+    w.cue('music', t=th, section='fatality')
+    w.mark('smash', th)
+    s = sd(A, D, th)
+    a_ = area(c)
+
+    def blast(world):
+        f = world.f[D.name]
+        x, y = world_point(f, world.t, 'chest')
+        z = f.z
+        for k, (r1, d, col) in enumerate(((80, 0.5, 'ffffff'), (150, 0.7, 'd8e8ff'), (240, 0.9, 'a8c0e8'))):
+            world.effects.append(fx.Ring(x, y, world.t + k * 0.04, 4, r1, d, col, thick=3))
+        world.effects.append(fx.Ring(x, floor_y(z), world.t, 8, 300, 0.9, 'e0d8e8', squash=0.6, thick=3))
+        if hasattr(world.stage, 'crater'):
+            world.stage.crater(x, z, 30, c.seed())
+        fx.burst(world, fx.ASPHALT, x, floor_y(z) - 2, z, 70, (60, 240), angle=-math.pi / 2, spread=1.5,
+                 life=(1.0, 2.2), size=(1, 2.8), seed=c.seed(), zs=1.4)
+        fx.burst(world, fx.DUST, x, floor_y(z) - 3, z, 90, (100, 280), angle=0.0, spread=math.pi, life=(0.8, 1.8),
+                 size=(2.0, 3.6), seed=c.seed(), zs=1.8)
+        fx.burst(world, fx.SPARK, x, y, z, 50, (80, 260), life=(0.3, 0.8), size=(1, 1.8), seed=c.seed())
+        st = world.stage
+        if hasattr(st, 'lamps'):
+            for gx in range(int(a_['x'][0]) - 60, int(a_['x'][1]) + 60, 28):
+                fx.burst(world, fx.GLASS, gx, floor_y(0) - 30 - (gx % 3) * 10, 3, 8, (40, 160), angle=math.pi / 2,
+                         spread=1.2, life=(0.8, 1.8), size=(1, 1.6), seed=c.seed(), zs=0.9, up=30)
+                st.darken(gx, floor_y(0) - 34, 12, 0.6, 0.6, c.seed())
+            for lp in st.lamps + [st.traffic]:
+                if abs(lp.x - x) < 500:
+                    lp.off_t = world.t + 0.1
+            for car in st.cars:
+                if abs(car.x - x) < 500:
+                    car.hop = (world.t + 0.05, 10.0)
+                    car.alarm_t = world.t + 0.3
+        world.f[D.name].st.shield = False
+        world.f[D.name].shields.append((world.t, False))
+        world.cue('shockwave', x=x)
+        world.cue('glass', t=world.t + 0.1, x=x, power=3.0)
+        world.count['hits'] += 1
+    w.at(th, blast)
+    D.shields.append((th, False))
+    tg = c.target_for(D, th, None, kinds=('car',), dirn=s, maxd=400)
+    if tg is not None:
+        land = (tg.x - s * 6, tg.z + 2)
+    else:
+        land = off_hole(c, clamp_x(c, D.x_at(th) + s * 220, 6), D.z_at(th) + 10)
+    D.add(th, 'thrown', 0.9, to=land, ease=lambda u: u, air=arc(30, 0.0, 14.0 if tg else 0.0), blend=0.02, face=-s)
+    w.trail(D.name, th, th + 0.9)
+    w.cam_fast.append((th, th + 2.0, 2.6))
+    t_g = th + 0.9
+    if tg is not None:
+        tg.ref.state = tg.ref.state
+        tg.smash(w, t_g, 2.4, s, c.seed())
+    w.mark('blasted', t_g)
+
+    def hurt(world):
+        f = world.f[D.name]
+        fx.burst(world, fx.BLOOD, f.x, floor_y(f.z) - 16, f.z, 14, (40, 120), life=(0.8, 1.4), size=(1, 2), seed=c.seed())
+        f.st.wounds.append(dict(wound('head', 'stain', 1.5, c.rng), seed=c.seed()))
+        world.count['hits'] += 1
+    w.at(t_g, hurt)
+    D.add(t_g, 'bounce', 0.45, to=off_hole(c, land[0] + s * 30, land[1] + 20), air=arc(10, 14.0 if tg else 0.0, 0.0),
+          blend=0.02)
+    floor_hit(c, t_g + 0.45, D.name, 1.2)
+    D.add(t_g + 0.45, 'lie_front', 1.2, blend=0.04)
+    if shield:
+        sx_, sz_ = A.x_at(th) + s * 60, A.z_at(th) + 20
+        w.effects.append(fx.ShieldRoll((sx_, sz_), (sx_ + s * 150, sz_ + 6), th + 0.5, th + 2.9, th + 60.0,
+                                       colors=D.look.gear['shield'].get('colors')))
+        w.cue('shield_roll', t=th + 0.5, dur=2.4, x=sx_ + 80)
+    t = t_g + 1.65
+    D.add(t, 'kneel_up', 1.1, blend=0.05)
+    D.add(t + 1.1, 'fall_back', 0.8, blend=0.03)
+    floor_hit(c, t + 1.7, D.name, 0.6)
+    D.add(t + 1.9, 'lie_front', 30.0, blend=0.04)
+    w.mark('falls_back', t + 1.7)
+    A.add(th + 0.6, 'stalk', t + 1.6 - (th + 0.6), to=off_hole(c, land[0] - s * 120, land[1] + 30))
+    t_roar = t + 1.7
+    A.add(t_roar, 'roar', 1.6, blend=0.08)
+    w.at(t_roar + 0.3, lambda world: setattr(world.f[A.name].st, 'roar', 1.0))
+    w.at(t_roar + 1.3, lambda world: setattr(world.f[A.name].st, 'roar', 0.0))
+    w.shake(t_roar + 0.3, 3.0, 1.0)
+    w.cue('roar', t=t_roar + 0.3, dur=1.1, who=A.name, big=True)
+    w.mark('final_roar', t_roar + 0.3)
+    A.add(t_roar + 1.6, 'stalk', 6.0, dx=-24, blend=0.1)
+    t_win = t_roar + 1.4
+    name = A.spec['name'] + ' WINS'
+    w.words.append(T.Word(name, t_win, 999.0, 240, 60, 'big', TITLE_COLORS.get(A.spec['title_colors'], T.GOLD), drop=10))
+    w.cue('say', t=t_win, text=name, voice='announcer')
+    w.cue('music', t=t_win, section='end')
+    w.mark('wins', t_win)
+    return end_card(c, A, D, t_win + 2.4)
+
+
+def end_card(c, A, D, t):
+    """The end card: the scene dims, the two names drop in with VS between them."""
+    w = c.w
+    w.darkness.append((t, t + 0.8, 0.72))
+    na, nd = A.spec['name'], D.spec['name']
+    ca = TITLE_COLORS.get(A.spec['title_colors'], T.GOLD)
+    cd = TITLE_COLORS.get(D.spec['title_colors'], T.GOLD)
+    words = [T.Word(na, t + 0.6, 999.0, 130, 122, 'huge' if len(na) <= 6 else 'mid', ca, drop=10),
+             T.Word('VS', t + 0.9, 999.0, 240, 124, 'mid', T.BONE)]
+    parts = nd.split(' ')
+    if len(parts) == 2 and len(nd) > 9:
+        words += [T.Word(parts[0], t + 1.2, 999.0, 340, 108, 'mid', cd), T.Word(parts[1], t + 1.35, 999.0, 340, 136,
+                                                                              'mid', T.RED if 'AMERICA' in parts[1] else cd)]
+    else:
+        words.append(T.Word(nd, t + 1.2, 999.0, 340, 122, 'mid', cd))
+    w.words += words
+    for k, tt in enumerate((t + 0.6, t + 0.9, t + 1.2)):
+        w.shake(tt, 1.0, 0.12)
+        w.cue('slam', t=tt, x=w.cam[0] + 150 + 90 * k)
+    w.mark('end_card', t + 1.4)
+    return t + 4.2
+
+
+FINISHERS['titan_smash'] = titan_smash
+CLIMAXES['last_stand'] = last_stand
+FATALITIES = {'fire_breath', 'ice_shatter'}

@@ -97,12 +97,14 @@ def target_local(j, where):
 def world_point(f, t, where):
     j = rig.solve(f.pose_at(t), f.look.dims)
     lx, ly = target_local(j, where)
-    return (f.x_at(t) + f.facing_at(t) * f.K * lx, floor_y(f.z_at(t)) - f.y_at(t) + f.K * ly)
+    K = f.K_at(t)
+    return (f.x_at(t) + f.facing_at(t) * K * lx, floor_y(f.z_at(t)) - f.y_at(t) + K * ly)
 
 
 def joint_point(f, t, name):
     j = rig.solve(f.pose_at(t), f.look.dims)
-    return (f.x_at(t) + f.facing_at(t) * f.K * j[name][0], floor_y(f.z_at(t)) - f.y_at(t) + f.K * j[name][1])
+    K = f.K_at(t)
+    return (f.x_at(t) + f.facing_at(t) * K * j[name][0], floor_y(f.z_at(t)) - f.y_at(t) + K * j[name][1])
 
 
 def tip_local(f, move, hu, limb, params, wep=None):
@@ -280,7 +282,12 @@ def strike(c, att, dfn, t, name, where='head', dur=None, react='hit_head', rdur=
                              size=(1.2, 2.0), seed=c.seed())
             if wound:
                 for wd in (wound if isinstance(wound, list) else [wound]):
+                    wd = dict(wd)
+                    if D.heavy and wd.get('kind') == 'stain':
+                        wd['kind'] = 'bruise'           # a titan's skin bruises
                     D.st.wounds.append(dict(wd, seed=c.seed()))
+            if D.heavy:
+                D.st.anger = min(1.0, D.st.anger + 0.04)  # and every blow makes him angrier
         world.shake(th, shake, 0.25)
         if flash:
             world.flash(th, flash, 0.1)

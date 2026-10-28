@@ -39,21 +39,30 @@ FIGHTER = {
     },
     'strikes': {
         'light': ['hulk_jab', 'swat'],
-        'heavy': ['haymaker', 'double_fist_high', 'stomp'],
+        'heavy': ['haymaker', 'double_fist_high', 'swat'],
         'launcher': ['swat'],
         'low': ['stomp'],
         'air': [],
         'leap': [],
     },
     'weapons': [],
+    # a titan's kit (shared beats): grabs and throws, cars and road slabs thrown, the ground smash, the thunderclap,
+    # leaps across the block, the rage; plus the routes only a titan opens (the road caving in, the leap back up)
     'powers': [
+        {'beat': 'ankle_slam', 'element': 'strength'},
+        {'beat': 'throat_slam', 'element': 'strength'},
+        {'beat': 'car_throw', 'element': 'strength'},
+        {'beat': 'chunk_throw', 'element': 'strength'},
+        {'beat': 'ground_smash', 'element': 'strength'},
+        {'beat': 'charge_trip', 'element': 'strength'},
+        {'beat': 'charge', 'element': 'strength'},
         {'beat': 'shockwave', 'element': 'strength'},
         {'beat': 'leap_smash', 'element': 'strength'},
-        {'beat': 'roar', 'element': 'strength'},
+        {'beat': 'rage', 'element': 'strength'},
     ],
     'signature': {'beat': 'leap_smash', 'line': 'HULK SMASH!'},
     'breakout': 'strength',
-    'finisher': 'knockout',
-    'entrance': 'drop_down',
+    'finisher': 'titan_smash',       # the Marvel ending: HULK SMASH!, the street blown apart, HULK WINS, the end card
+    'entrance': 'meteor',           # drops out of the sky onto the road
     'voice': 'hulk',
 }

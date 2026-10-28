@@ -1,5 +1,6 @@
-"""Effect kinds for city fights, titans and shields (from the HULK vs CAPTAIN AMERICA clip), registered into the
-shared sfx.REGISTRY on import: roars, heavy landings, smashes and body slams, the thunderclap and its shockwave, the
+"""Effect kinds for city fights, titans and shields (from the HULK vs CAPTAIN AMERICA clip, made dry in HULK-2 like
+SOUND-2's weapons: short rooms, metal that no longer rings for a second), registered into the shared sfx.REGISTRY
+on import: roars, heavy landings, smashes and body slams, the thunderclap and its shockwave, the
 shield's ringing blocks, ricochets, flight, catch and roll, glass, cars, poles and steel, live wires, walls bursting,
 cave-ins, wood and plates, water. Heavy fighters' footsteps ('steps' cues with heavy=True) get their own sound. The
 'hulk' voice style is added to voice.STYLES. Everything is synthesised (no samples).
@@ -68,19 +69,19 @@ def roar(c, rng):
     return x
 
 
-@register('hulk_land', gain_db=0.0, reverb=0.45)
+@register('hulk_land', gain_db=0.0, reverb=0.18)
 def hulk_land(c, rng):
     """A giant landing: a sub boom, the road cracking, a long rain of debris."""
     n = n_of(2.4)
-    x = _thump(n, 75, 22, 5, 0.7, rng) * 1.8
+    x = _thump(n, 75, 22, 5, 0.35, rng) * 1.8
     x += hp(white(n, rng), 1500) * env(n, 0.0005, 0.03) * 1.2
     x += crackle(n, rng, rate=2000, decay=0.0015, lo=700, hi=5000) * env(n, 0.002, 0.08) * 2.4
-    x += _debris(n, rng, 2.2, 140) * 1.8
-    x += lp(brown(n, rng), 200) * env(n, 0.02, 0.8) * 0.5
+    x += _debris(n, rng, 1.0, 140) * 1.8
+    x += lp(brown(n, rng), 200) * env(n, 0.02, 0.35) * 0.5
     return sat(x, 1.5)
 
 
-@register('smash', gain_db=-1.0, reverb=0.35)
+@register('smash', gain_db=-1.0, reverb=0.14)
 def smash(c, rng):
     """A fist or a body smashing a floor: boom, crack, chunks; tiles add a ceramic clatter."""
     p = float(c.get('power', 1.0))
@@ -88,13 +89,13 @@ def smash(c, rng):
     x = _thump(n, 85, 30, 9, 0.25 + 0.12 * p, rng) * (1.2 + 0.3 * p)
     x += hp(white(n, rng), 1800) * env(n, 0.0005, 0.025) * 1.1
     x += crackle(n, rng, rate=1600, decay=0.0015, lo=800, hi=5000) * env(n, 0.002, 0.06) * 2.0
-    x += _debris(n, rng, 1.4, 90 * p) * 1.5
+    x += _debris(n, rng, 0.8, 90 * p) * 1.5
     if c.get('floor') == 'tile':
         x += _tinkle(n, rng, 40, 1800, 5000, 0.5) * 0.6
     return sat(x, 1.4)
 
 
-@register('body_slam', gain_db=-1.0, reverb=0.35)
+@register('body_slam', gain_db=-1.0, reverb=0.14)
 def body_slam(c, rng):
     p = float(c.get('power', 1.5))
     n = n_of(1.8)
@@ -104,28 +105,28 @@ def body_slam(c, rng):
     return sat(x, 1.3)
 
 
-@register('clap', gain_db=1.0, reverb=0.6)
+@register('clap', gain_db=1.0, reverb=0.22)
 def clap(c, rng):
     """The thunderclap: a crack like a gunshot, a sub punch, a rolling boom, a ringing in the ears."""
     n = n_of(4.0)
     t = times(n)
     crack = white(n, rng) * env(n, 0.0002, 0.012) * 2.5
     x = crack + hp(white(n, rng), 3000) * env(n, 0.0, 0.05)
-    x += _thump(n, 90, 24, 6, 0.9, rng) * 2.0
-    x += lp(brown(n, rng), 160) * env(n, 0.05, 1.4) * 1.4
-    x += _tinkle(n, rng, 120, 2500, 9000, 1.2) * 0.5
-    ring = np.sin(2 * np.pi * 3900 * t) * env(n, 0.05, 1.5) * 0.05
+    x += _thump(n, 90, 24, 6, 0.4, rng) * 2.0
+    x += lp(brown(n, rng), 160) * env(n, 0.05, 0.6) * 1.4
+    x += _tinkle(n, rng, 120, 2500, 9000, 0.6) * 0.5
+    ring = np.sin(2 * np.pi * 3900 * t) * env(n, 0.02, 0.25) * 0.04
     return sat(x * 1.2, 1.6) + ring
 
 
-@register('shockwave', gain_db=1.5, reverb=0.6)
+@register('shockwave', gain_db=1.5, reverb=0.22)
 def shockwave(c, rng):
     """The last blow on the shield: a vast clang, a boom that rolls down the street, every window going."""
     n = n_of(5.0)
-    x = _metal(n, rng, base=210, bright=1.2, decay=2.2) * env(n, 0.0005, 3.0) * 1.3
+    x = (_metal(n, rng, base=210, bright=1.0, decay=0.08) * env(n, 0.0005, 0.12) + sfx._steel(n, rng, weight=2.5)) * 1.3
     x += _fit(clap({}, rng), n)
-    x += _thump(n, 55, 18, 3, 1.4, rng) * 1.6
-    x += _debris(n, rng, 4.0, 160) * 1.4
+    x += _thump(n, 55, 18, 3, 0.5, rng) * 1.6
+    x += _debris(n, rng, 1.6, 160) * 1.4
     return sat(x, 1.5)
 
 
@@ -150,7 +151,7 @@ def throw(c, rng):
     return swing(c, rng)
 
 
-@register('rip_road', gain_db=-3.0, reverb=0.3)
+@register('rip_road', gain_db=-3.0, reverb=0.14)
 def rip_road(c, rng):
     n = n_of(1.0)
     t = times(n)
@@ -257,7 +258,7 @@ def shield_roll(c, rng):
 
 
 # ------------------------------------------------------------------ the street
-@register('glass', gain_db=-6.0, reverb=0.3)
+@register('glass', gain_db=-6.0, reverb=0.12)
 def glass(c, rng):
     p = float(c.get('power', 1.0))
     n = n_of(1.0 + 0.6 * p)
@@ -265,25 +266,25 @@ def glass(c, rng):
     return crash + _tinkle(n, rng, int(50 + 70 * p), 2500, 10000, 0.4 + 0.4 * p) * 1.2
 
 
-@register('car_hit', gain_db=-3.0, reverb=0.3)
+@register('car_hit', gain_db=-3.0, reverb=0.12)
 def car_hit(c, rng):
     """Sheet metal crumpling: a hollow boom, a crunch, a ringing panel."""
     p = float(c.get('power', 1.0))
     n = n_of(1.4)
     x = _thump(n, 95, 40, 10, 0.25 + 0.1 * p, rng) * 1.4
-    x += crackle(n, rng, rate=900, decay=0.0025, lo=400, hi=3500) * env(n, 0.002, 0.18) * 2.2
-    x += _metal(n, rng, base=rng.uniform(110, 150), bright=0.5, decay=0.6) * env(n, 0.001, 0.5) * 0.6
+    x += crackle(n, rng, rate=900, decay=0.0025, lo=400, hi=3500) * env(n, 0.002, 0.1) * 2.2
+    x += _metal(n, rng, base=rng.uniform(110, 150), bright=0.5, decay=0.06) * env(n, 0.001, 0.08) * 0.6
     return sat(x * (0.8 + 0.3 * p), 1.4)
 
 
-@register('car_crash', gain_db=-1.0, reverb=0.4)
+@register('car_crash', gain_db=-1.0, reverb=0.15)
 def car_crash(c, rng):
     p = float(c.get('power', 1.5))
     n = n_of(2.6)
     x = _fit(car_hit({'power': p}, rng), n) * 1.2
     i = n_of(0.12)
     x[i:] += _fit(car_hit({'power': p * 0.7}, rng), n - i) * 0.7
-    x += crackle(n, rng, rate=300, decay=0.004, lo=300, hi=3000) * env(n, 0.05, 0.9) * 1.4
+    x += crackle(n, rng, rate=300, decay=0.004, lo=300, hi=3000) * env(n, 0.03, 0.35) * 1.4
     x += _tinkle(n, rng, 90, 2500, 9000, 0.8) * 0.8
     return sat(x, 1.4)
 
@@ -311,20 +312,20 @@ def car_fly(c, rng):
     return sfx.fly(c, rng) * 1.3
 
 
-@register('pole_hit', gain_db=-4.0, reverb=0.35)
+@register('pole_hit', gain_db=-4.0, reverb=0.1)
 def pole_hit(c, rng):
     n = n_of(1.6)
-    return _metal(n, rng, base=rng.uniform(150, 190), bright=0.9, decay=1.0) * env(n, 0.0005, 1.2) + \
+    return _metal(n, rng, base=rng.uniform(150, 190), bright=0.9, decay=0.05) * env(n, 0.0005, 0.08) + sfx._steel(n, rng, weight=1.2) * 0.8 + \
         _thump(n, 120, 50, 15, 0.1, rng)
 
 
-@register('metal_crash', gain_db=-3.0, reverb=0.35)
+@register('metal_crash', gain_db=-3.0, reverb=0.12)
 def metal_crash(c, rng):
     n = n_of(1.8)
-    x = _metal(n, rng, base=rng.uniform(120, 160), bright=1.0, decay=0.8) * env(n, 0.0005, 0.9)
+    x = _metal(n, rng, base=rng.uniform(120, 160), bright=1.0, decay=0.07) * env(n, 0.0005, 0.12) + sfx._steel(n, rng, weight=1.5)
     for k in range(4):
         i = n_of(0.1 + 0.09 * k + rng.uniform(0, 0.04))
-        x[i:] += _metal(n - i, rng, base=rng.uniform(140, 220), bright=0.7, decay=0.3) * 0.5 / (k + 1)
+        x[i:] += _metal(n - i, rng, base=rng.uniform(140, 220), bright=0.7, decay=0.04) * 0.5 / (k + 1)
     return sat(x + _thump(n, 100, 45, 12, 0.15, rng), 1.3)
 
 
@@ -356,7 +357,7 @@ def fire(c, rng):
     return sfx.coals(c, rng) * 1.2
 
 
-@register('wall_break', gain_db=-1.0, reverb=0.45)
+@register('wall_break', gain_db=-1.0, reverb=0.18)
 def wall_break(c, rng):
     """A wall burst through: a deep boom, cracking brick, a long rubble fall, dust."""
     p = float(c.get('power', 1.0))
@@ -364,12 +365,12 @@ def wall_break(c, rng):
     x = _thump(n, 80, 30, 8, 0.3 + 0.1 * p, rng) * 1.5
     x += hp(white(n, rng), 1600) * env(n, 0.0005, 0.03) * 1.2
     x += crackle(n, rng, rate=1400, decay=0.002, lo=600, hi=4500) * env(n, 0.003, 0.15) * 2.2
-    x += _debris(n, rng, 2.2, 110 * p, 600, 4500) * 1.8
-    x += lp(white(n, rng), 1800) * env(n, 0.1, 0.8) * 0.15
+    x += _debris(n, rng, 1.2, 110 * p, 600, 4500) * 1.8
+    x += lp(white(n, rng), 1800) * env(n, 0.05, 0.4) * 0.15
     return sat(x, 1.4)
 
 
-@register('cave_in', gain_db=0.0, reverb=0.55)
+@register('cave_in', gain_db=0.0, reverb=0.25)
 def cave_in(c, rng):
     n = n_of(3.6)
     x = _fit(wall_break({'power': 2.0}, rng), n) * 1.2
@@ -378,7 +379,7 @@ def cave_in(c, rng):
     return sat(x, 1.4)
 
 
-@register('table_break', gain_db=-3.0, reverb=0.25)
+@register('table_break', gain_db=-3.0, reverb=0.12)
 def table_break(c, rng):
     n = n_of(1.2)
     snap = bp(white(n, rng), 800, 4000) * env(n, 0.0003, 0.02) * 1.8
@@ -386,7 +387,7 @@ def table_break(c, rng):
     return x + _tinkle(n, rng, 30, 1800, 6000, 0.4) * 0.6
 
 
-@register('wood_crash', gain_db=-1.0, reverb=0.35)
+@register('wood_crash', gain_db=-1.0, reverb=0.14)
 def wood_crash(c, rng):
     n = n_of(2.0)
     x = _fit(table_break(c, rng), n) * 1.2 + _thump(n, 80, 32, 8, 0.35, rng) * 1.2

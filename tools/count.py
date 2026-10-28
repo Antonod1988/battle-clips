@@ -29,7 +29,7 @@ def run(recipe, per_beat=False, idle=False, levels=False):
         if levels:
             for n, f in w.f.items():
                 a, _ = f.find(w.t)
-                if a is not None and a.air is None and not w.is_hidden(n):
+                if a is not None and a.air is None and a.attach is None and not w.is_hidden(n):
                     g = w.stage.ground(f.x, f.z, w.t, f.y + 1)
                     if abs(g - f.y) > 2.0 and (not bad or bad[-1][1] < vt - 0.5 or bad[-1][0] != n):
                         bad.append((n, vt, round(f.x), round(f.z), round(f.y, 1), round(g, 1), a.move.__name__))
