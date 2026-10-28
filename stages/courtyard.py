@@ -504,6 +504,23 @@ def lantern(cv, x, y):
 
 
 # ================================================================== the stage protocol (what the engine and the beats use)
+# A stage module gives the engine a Stage class with:
+#   view(cam) -> (canvas, offset)          the background crop for the camera (canvas = 480x270 plus an 8 px margin)
+#   cam_limits(world, t) -> (xrange, yrange)
+#   ground(x, z, t, y) -> height           the highest surface at (x, z) not above y (VOID = -999 if none)
+#   surface_fn(x, z, y, t) -> fn(X, Z)     the height function of the surface a fighter stands on (he keeps to it)
+#   ground_arr(xs, zs, hs, t) -> (heights, stampable)   the same for particles, vectorised
+#   stamp(x, z, color, r, alpha, seed, h)  paints a splat that stays (blood, scorch, chips); tint(...) coats ice
+#   floor_lights(cv, off, t, world)        light pools on the floor (braziers, street lamps)
+#   sprites(t, world) -> [(z, obj)]        things sorted in depth with the fighters; obj.draw(cv, ox, oy, t) may
+#                                          return a light (x, y, radius, colour, strength)
+#   overlay(cv, off, t, world)             a foreground layer over everything (mist, a cutaway)
+#   update(world, t, dt)                   per-frame stage logic (usually nothing)
+#   AREAS, ROUTES, START, TITLE_PAN        data for the choreographer (see below); area_y, area_of, route_open
+#   targets(area, t) -> [Target]           what can be smashed: Target.kind, x, z, h, ok(t), smash(world, t, power,
+#                                          out, seed)
+#   optional: smash_floor(world, x, z, power, seed, g), smash_through(c, A, D, t, route), set_piece(c, A, D, t, name),
+#   eave_fall(...); and a module-level setup(world) for hooks. The projection: set_projection(Y0, FS) in __init__.
 import fx  # noqa: E402
 
 VOID = -999.0

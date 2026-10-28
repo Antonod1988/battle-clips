@@ -1046,7 +1046,7 @@ def fire_dash(c, A, D, t, through=False):
 
 @beat('magic', 'escalation', weight=1.6, needs=lambda c, A, D, t: has(A, 'fire_tornado') and A.tier >= 3)
 def fire_tornado(c, A, D, t):
-    """FLOW-1: A whirls his fire up round D: a tornado of hellfire tall as the hall lifts him, burns him and throws
+    """A whirls his fire up round D: a tornado of hellfire tall as the hall lifts him, burns him and throws
     him out."""
     w = c.w
     rng = c.rng
@@ -1292,7 +1292,7 @@ def ice_shower(c, A, D, t):
 
 @beat('magic', 'escalation', weight=2.0, needs=lambda c, A, D, t: has(A, 'ice_spikes'))
 def ice_spikes(c, A, D, t):
-    """FLOW-1: A drives his palms into the floor and a forest of giant ice spikes bursts out under D (as tall as the
+    """A drives his palms into the floor and a forest of giant ice spikes bursts out under D (as tall as the
     hall for the strong); D is thrown high, or springs clear if he is quick."""
     w = c.w
     rng = c.rng
@@ -1350,7 +1350,7 @@ def ice_spikes(c, A, D, t):
 
 @beat('magic', 'escalation', weight=1.4, needs=lambda c, A, D, t: has(A, 'floor_freeze'))
 def floor_freeze(c, A, D, t):
-    """FLOW-1: the whole floor freezes from A's palms outward; D's feet go out from under him and A slides in with a
+    """The whole floor freezes from A's palms outward; D's feet go out from under him and A slides in with a
     kick while he is down."""
     w = c.w
     rng = c.rng
@@ -2144,6 +2144,7 @@ def shield_combo(c, A, D, t):
 
 @beat('climax', weight=0.0, pool=False)
 def leap_smash_climax(c, A, D, t):
+    """A titan's climax: a roar, then the leap out of the picture and the smash down where D stands."""
     t = roar(c, A, D, t)
     return leap_smash(c, A, D, t)
 
