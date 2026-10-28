@@ -116,6 +116,12 @@ def engage(c, A, D, t, dist=None, fast=True):
     s = sd(A, D, t)
     g = gap(A, D, t)
     dzz = abs(D.z_at(t) - A.z_at(t))
+    if g < dist * 0.7:
+        # too close (on top of him): a quick hop back to fighting distance first
+        tx = clamp_x(c, D.x_at(t) - s * dist, 4)
+        A.add(t, 'hop_back', 0.3, to=(tx, D.z_at(t)), air=acts.rel(A, t, 6), face=s)
+        guard(A, t + 0.3)
+        return t + 0.3
     if g < dist + 6 and dzz < 10:
         return t
     tx = D.x_at(t) - s * dist
@@ -1741,6 +1747,8 @@ def shockwave(c, A, D, t):
         world.cue('clap', x=x)
         world.cue('shockwave', x=x)
         world.count['hits'] += 1
+        world.f[D.name].flash_t = world.t
+        world.jolt(D.name, 6.0)
         for tg in world.stage.targets(c.area, tc_):
             if abs(tg.x - x) < 120:
                 tg.smash(world, tc_ + abs(tg.x - x) / 400.0, 1.5, 1 if tg.x > x else -1, c.seed())
@@ -1768,6 +1776,13 @@ def leap_smash(c, A, D, t):
     D.add(t + 0.8, 'crouch_look', 0.5)
     crater(c, x, z, tl, 2.5 * power(A) / 1.8, g=g)
     w.cue('hulk_land', t=tl, x=x, power=2.0)
+
+    def blown(world):
+        world.f[D.name].flash_t = world.t
+        world.jolt(D.name, 6.0)
+        world.count['hits'] += 1
+        world.cue('hit', who=D.name, weight=2, limb='punch', blood=6)
+    w.at(tl + 0.02, blown)
     to = (clamp_x(c, x + s * 70, 6), clamp_z(c, z + 10, 6))
     tumble_to(c, D, tl, to, 0.6, 30)
     t_up = fall_lie_up(c, D, tl + 0.6, -8, 0.4, 0.5, slow=True)

@@ -11,8 +11,8 @@ RECIPE = {
     'fighters': ['scorpion', 'subzero'],          # left, right
     'stage': 'temple',
     'start_area': 'courtyard',
-    'length': 123,                                # seconds of video (the choreographer aims at this)
-    'seed': 7,
+    'length': 122,                                # seconds of video (the choreographer aims at this)
+    'seed': 20,
     'winner': 'scorpion',
     'finisher': 'fire_breath',
     'music': 'ninja',

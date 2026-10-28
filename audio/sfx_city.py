@@ -188,25 +188,26 @@ def fall_whistle(c, rng):
 
 
 # ------------------------------------------------------------------ the shield
-@register('shield_block', gain_db=-1.0, reverb=0.4)
+@register('shield_block', gain_db=-2.0, reverb=0.12)
 def shield_block(c, rng):
-    """A blow on the shield: a deep ringing clang and the shove behind it."""
+    """A blow on the shield, dry like the weapons after SOUND-2: the crack of contact, a short low clang that is gone
+    within a tenth of a second, and the shove behind it (no long ring)."""
     w = int(c.get('weight', 2))
-    n = n_of(2.2)
-    ring = _metal(n, rng, base=rng.uniform(300, 340), bright=1.0, decay=0.9 + 0.3 * w) * env(n, 0.0005, 1.6)
-    knock = hp(white(n, rng), 2500) * env(n, 0.0, 0.006) * 1.2
-    shove = _thump(n, 120, 45, 14, 0.12 + 0.05 * w, rng) * (0.8 + 0.3 * w)
-    return sat(ring * 0.9 + knock + shove, 1.3)
+    n = n_of(0.6)
+    steel = sfx._steel(n, rng, weight=1.0 + 0.3 * w, grit=1.0)
+    clang = _metal(n, rng, base=rng.uniform(260, 320), bright=0.8, decay=0.05 + 0.02 * w) * env(n, 0.0005, 0.09)
+    shove = _thump(n, 120, 45, 14, 0.1 + 0.04 * w, rng) * (0.8 + 0.3 * w)
+    return sat(steel + clang * 0.5 + shove, 1.3)
 
 
-@register('shield_ricochet', gain_db=-3.0, reverb=0.35)
+@register('shield_ricochet', gain_db=-4.0, reverb=0.1)
 def shield_ricochet(c, rng):
-    """The shield bouncing off something: a bright ping, a short whine, a thump if it struck a body."""
-    n = n_of(1.4)
+    """The shield bouncing off something: a dry ping (gone in a few hundredths), a short whine, a thump on a body."""
+    n = n_of(0.5)
     t = times(n)
-    ping = _metal(n, rng, base=rng.uniform(480, 560), bright=1.4, decay=0.5) * env(n, 0.0003, 0.9)
-    whine = osc(3200 - 1400 * np.clip(t / 0.25, 0, 1), n) * env(n, 0.002, 0.12) * 0.25
-    x = ping + whine + hp(white(n, rng), 3000) * env(n, 0.0, 0.004)
+    ping = _metal(n, rng, base=rng.uniform(480, 560), bright=1.0, decay=0.03) * env(n, 0.0003, 0.05)
+    whine = osc(3200 - 1400 * np.clip(t / 0.25, 0, 1), n) * env(n, 0.002, 0.1) * 0.2
+    x = sfx._steel(n, rng, weight=0.8) * 0.8 + ping * 0.5 + whine
     if c.get('hit'):
         x += _thump(n, 150, 60, 20, 0.1, rng) * 1.2
     return sat(x, 1.2)
