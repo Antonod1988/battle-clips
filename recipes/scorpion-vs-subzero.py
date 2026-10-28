@@ -12,7 +12,7 @@ RECIPE = {
     'stage': 'temple',
     'start_area': 'courtyard',
     'length': 123,                                # seconds of video (the choreographer aims at this)
-    'seed': 5,
+    'seed': 7,
     'winner': 'scorpion',
     'finisher': 'fire_breath',
     'music': 'ninja',

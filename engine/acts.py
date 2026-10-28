@@ -136,6 +136,17 @@ def hand_pt(f, t, side='n'):
     return joint_point(f, t, side.upper() + 'W')
 
 
+def keep_in(c, D, t, away, knock):
+    """Shortens a knockback so it does not carry D off the area he fights in (over a cliff, off a roof)."""
+    st = c.w.stage
+    if not hasattr(c, 'area') or c.area not in getattr(st, 'AREAS', {}):
+        return knock
+    a = st.AREAS[c.area]
+    x = D.x_at(t)
+    room = (a['x'][1] + 18 - x) if away > 0 else (x - a['x'][0] + 18)
+    return max(0.0, min(knock, room))
+
+
 def guard_move(f, t):
     """The guard that fits what he holds."""
     n = f.wep_at(t, 'n')[0]
@@ -211,6 +222,7 @@ def strike(c, att, dfn, t, name, where='head', dur=None, react='hit_head', rdur=
         D.add(th - 0.05, 'block_hold' if already else 'block', 0.36, dx=-knock * 0.4, ease=moves.out, blend=0.04)
         D.add(th + 0.31, guard_move(D, th + 0.31), 9.0, blend=0.1)
     elif react:
+        knock = keep_in(c, D, th, face, knock)
         D.add(th, react, rdur, dx=-knock, dz=kz, ease=moves.out, air=react_air, blend=0.03)
         if react in ('hit_head', 'hit_body'):
             D.add(th + rdur, guard_move(D, th + rdur), 9.0, blend=0.1)

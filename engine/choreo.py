@@ -212,6 +212,9 @@ def build_once(recipe, stage_mod, stage, specs, body=None):
     c = Choreo(world, recipe, winner, start_area)
     W_, L_ = (A, D) if winner == A.name else (D, A)
     pins = [dict(p) for p in recipe.get('pins', [])]
+    if recipe.get('auto_pins', True):
+        pins = pins + auto_pins(c, A, D, recipe)
+        pins.sort(key=lambda p: ACTS.index(p['act']) if p.get('act') in ACTS else 99)
     c.pinned_later = set(p['beat'] for p in pins)
     finisher = recipe.get('finisher') or W_.spec.get('finisher', 'knockout')
     length = float(recipe.get('length', 120.0))
@@ -314,6 +317,75 @@ def build_once(recipe, stage_mod, stage, specs, body=None):
     return world
 
 
+QUICK = ('teleport_strike', 'ice_slide', 'ice_ball', 'fire_dash', 'shield_throw', 'acrobat_dodge', 'ground_wave',
+         'roar')
+BIG = ('hellfire', 'ice_spikes', 'fire_tornado', 'floor_freeze', 'ice_shower', 'shockwave', 'leap_smash', 'shield_throw',
+       'ground_wave', 'spear_batted', 'shield_brace')
+
+
+def auto_pins(c, A, D, recipe):
+    """When a recipe pins nothing for an act, the choreographer pins the kits' own moments itself, so every fighter
+    shows what he can do: a quick special each in the opening, the weapons drawn (and a heavier one formed), one or two
+    big powers each in the magic act, one more in the escalation. Returns pins like a recipe's."""
+    given = set(p.get('act') for p in recipe.get('pins', []))
+    rng = c.rng
+    out = []
+    long_ = float(recipe.get('length', 120)) >= 90       # a short clip shows fewer specials, more close fighting
+
+    def powers(f, names):
+        have = [pw['beat'] for pw in f.spec.get('powers', []) if pw['beat'] in names and not pw.get('trap')]
+        return [n for n in have if n in B.BEATS]
+
+    used = set()
+
+    def take(f, names, k=1):
+        cand = [n for n in powers(f, names) if (f.name, n) not in used]
+        rng.shuffle(cand)
+        got = cand[:k]
+        for n in got:
+            used.add((f.name, n))
+        return got
+    if 'opening' not in given:
+        first, second = (A, D) if rng.uniform() < 0.5 else (D, A)
+        for f in ((first, second) if long_ else (first,)):
+            for n in take(f, QUICK, 1):
+                out.append({'act': 'opening', 'beat': n, 'by': f.name, 'auto': True})
+    if 'weapons' not in given:
+        armed = [f for f in (A, D) if f.spec.get('weapons')]
+        if armed:
+            f = armed[0] if len(armed) == 1 else (A if rng.uniform() < 0.5 else D)
+            heavy = [f2 for f2 in armed if any(wp.get('heavy') for wp in f2.spec['weapons'])]
+            if len(armed) == 1 and heavy:
+                # alone with a weapon against bare hands: he takes up his heaviest at once
+                hk = [wp['kind'] for wp in f.spec['weapons'] if wp.get('heavy')][0]
+                out.append({'act': 'weapons', 'beat': 'draw_weapons', 'by': f.name, 'kind': hk, 'auto': True})
+            else:
+                out.append({'act': 'weapons', 'beat': 'draw_weapons', 'by': f.name, 'auto': True})
+            if len(armed) == 2 and heavy:
+                other = [f2 for f2 in armed if f2 is not heavy[0]][0]
+                out.append({'act': 'weapons', 'beat': 'disarm', 'by': other.name, 'auto': True})
+                out.append({'act': 'weapons', 'beat': 'heavy_smash', 'by': heavy[0].name, 'auto': True})
+                if any(wp.get('how') == 'draw' for wp in other.spec['weapons']):
+                    out.append({'act': 'weapons', 'beat': 'recover_weapon', 'by': other.name, 'auto': True})
+            elif heavy:
+                out.append({'act': 'weapons', 'beat': 'heavy_smash', 'by': heavy[0].name, 'auto': True})
+    if 'magic' not in given:
+        order = [A, D] if rng.uniform() < 0.5 else [D, A]
+        for f in order:
+            for n in take(f, BIG, 1):
+                out.append({'act': 'magic', 'beat': n, 'by': f.name, 'auto': True})
+        if long_:
+            for f in order:
+                for n in take(f, BIG, 1):
+                    out.append({'act': 'magic', 'beat': n, 'by': f.name, 'auto': True})
+    if 'escalation' not in given and long_:
+        f = A if rng.uniform() < 0.5 else D
+        n = take(f, BIG + QUICK, 1) or take(D if f is A else A, BIG + QUICK, 1)
+        for nm in n:
+            out.append({'act': 'escalation', 'beat': nm, 'by': f.name, 'auto': True})
+    return out
+
+
 def run_pin(c, p, A, D, t, W_, L_):
     """A pinned beat: 'by' names who leads it (a fighter id, 'winner' or 'loser'); default the one who has it."""
     name = p['beat']
@@ -326,7 +398,15 @@ def run_pin(c, p, A, D, t, W_, L_):
         F1, F2 = (A, D) if by == A.name else (D, A)
     else:
         F1, F2 = (A, D) if B.has(A, name) or not B.has(D, name) else (D, A)
-    params = {k: v for k, v in p.items() if k not in ('act', 'beat', 'by')}
+    params = {k: v for k, v in p.items() if k not in ('act', 'beat', 'by', 'auto')}
+    if p.get('auto') and name in B.BEATS and B.BEATS[name]['needs'] is not None:
+        try:
+            ok = B.BEATS[name]['needs'](c, F1, F2, t)
+        except Exception:
+            ok = False
+        if not ok:
+            c.log.append(f'SKIP {name} by {F1.name}: not possible now')
+            return t
     if name == 'travel':
         route = None
         if 'to' in params:

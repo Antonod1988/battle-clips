@@ -153,6 +153,9 @@ def stills(world, out_dir, times_, fps=30):
     for a in times_:
         if a[0].isalpha():
             nm, _, off = a.partition('+')
+            if nm not in world.marks:
+                print(f'STILLS: no moment "{nm}" (moments: {", ".join(sorted(world.marks))})')
+                continue
             scene_t.append(world.marks[nm] + float(off or 0))
     items = []
     pending = sorted(scene_t)

@@ -5,6 +5,7 @@ the video length and the blow counts, optionally for several seeds and per beat.
     python tools/count.py recipes/scorpion-vs-subzero.py 5 6 7 8      these seeds
     python tools/count.py recipes/scorpion-vs-subzero.py --beats      hits and clashes per beat
     python tools/count.py recipes/<clip>.py --idle                    stretches where someone stands still
+    python tools/count.py recipes/<clip>.py --levels                  moments someone stands on nothing
 """
 import bisect
 import os
@@ -17,13 +18,21 @@ import moves  # noqa: E402
 import render  # noqa: E402
 
 
-def run(recipe, per_beat=False, idle=False):
+def run(recipe, per_beat=False, idle=False, levels=False):
     w = make.build_world(recipe, ) if False else make.build_world(recipe)
     snaps = []
     still = {n: [None, 0.0] for n in w.f}
     stood = []
+    bad = []
     for i, vt, img in render.frames(w, want=lambda i, vt: False):
         snaps.append((w.t, vt, w.count['hits'], w.count['clashes']))
+        if levels:
+            for n, f in w.f.items():
+                a, _ = f.find(w.t)
+                if a is not None and a.air is None and not w.is_hidden(n):
+                    g = w.stage.ground(f.x, f.z, w.t, f.y + 1)
+                    if abs(g - f.y) > 2.0 and (not bad or bad[-1][1] < vt - 0.5 or bad[-1][0] != n):
+                        bad.append((n, vt, round(f.x), round(f.z), round(f.y, 1), round(g, 1), a.move.__name__))
         if idle:
             for n, f in w.f.items():
                 mv = f.move_at(w.t)
@@ -50,6 +59,10 @@ def run(recipe, per_beat=False, idle=False):
         for (who, a, b) in stood:
             print(f'  STILL {who} {a:.2f}-{b:.2f}s')
         print(f'  {len(stood)} stretches of standing still (>= 0.45 s)')
+    if levels:
+        for b in bad:
+            print(f'  OFF-SURFACE {b}')
+        print(f'  {len(bad)} moments on no surface')
     return w
 
 
@@ -59,4 +72,4 @@ if __name__ == '__main__':
     for sd in (args or [r.get('seed', 1)]):
         r2 = dict(r)
         r2['seed'] = int(sd)
-        run(r2, '--beats' in sys.argv, '--idle' in sys.argv)
+        run(r2, '--beats' in sys.argv, '--idle' in sys.argv, '--levels' in sys.argv)

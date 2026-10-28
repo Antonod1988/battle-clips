@@ -540,7 +540,7 @@ class World:
         self.particles.draw(cv, off, lights, add)
         for (x, y, r, c, s) in lights:
             px.boost(cv, x, y, r, c, s * 0.55, squash=0.8)
-        st.front(cv, off, t, self)
+        st.overlay(cv, off, t, self)
         cv += add
         for (t0, s, d, c) in self.flashes:
             if t0 <= t <= t0 + d:

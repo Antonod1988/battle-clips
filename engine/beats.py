@@ -38,6 +38,16 @@ def area(c):
     return c.w.stage.AREAS[c.area]
 
 
+def floor_at(c, x, z, t):
+    """The floor height to land on at (x, z): the current area's own floor when the point is in it (so a landing never
+    picks a pillar cap or a rail by accident), else the highest surface there."""
+    a = area(c)
+    if a['x'][0] - 40 <= x <= a['x'][1] + 40 and a['z'][0] - 40 <= z <= a['z'][1] + 40:
+        return c.w.stage.area_y(c.area, x, z)
+    g = c.w.stage.ground(x, z, t, 999.0)
+    return g if g > -900 else 0.0
+
+
 def clamp_x(c, x, m=0.0):
     a = area(c)
     return max(a['x'][0] + m, min(a['x'][1] - m, x))
@@ -218,7 +228,7 @@ def entrance(c, f, t, how):
     """How a fighter appears under the title. Returns when he is in guard."""
     w = c.w
     x, z = f.x_init, f.z_init
-    g = w.stage.ground(x, z, t, 999.0)
+    g = floor_at(c, x, z, t)
     if how == 'fire_burst':
         f.hide.append((0.0, t))
         w.at(t - 0.04, lambda world: (mg.fire_puff(world, x, z, g, c.seed(), 1.3), world.cue('teleport_in', x=x)))
@@ -383,7 +393,7 @@ def air_clash(c, A, D, t):
     s = sd(A, D, t)
     mid = clamp_x(c, (A.x_at(t) + D.x_at(t)) / 2, 60)
     zm = clamp_z(c, (A.z_at(t) + D.z_at(t)) / 2, 4)
-    g = w.stage.ground(mid, zm, t, 999)
+    g = floor_at(c, mid, zm, t)
     A.add(t, 'stalk', 0.45, to=(mid - 48 * s, zm))
     D.add(t, 'stalk', 0.45, to=(mid + 48 * s, zm))
     tk = t + 0.5
@@ -443,13 +453,17 @@ def sweep_jump(c, A, D, t):
     return t_up + 0.05
 
 
+KNOCK_KINDS = ('brazier', 'pillar', 'gong', 'car', 'lamp', 'wall', 'column', 'table', 'counter', 'window', 'hydrant',
+               'pole')
+
+
 @beat('opening', 'weapons', 'escalation', 'magic', weight=1.6,
-      needs=lambda c, A, D, t: len(c.w.stage.targets(c.area, t)) > 0)
+      needs=lambda c, A, D, t: any(x.kind in KNOCK_KINDS for x in c.w.stage.targets(c.area, t)))
 def knock_into(c, A, D, t, kind=None):
     """A big blow throws D into something in the area (a brazier, a pillar, a car, a wall): it breaks."""
     rng = c.rng
     w = c.w
-    tg = c.target_for(D, t, kind)
+    tg = c.target_for(D, t, kind, kinds=None if kind else KNOCK_KINDS)
     if tg is None:
         return exchange(c, A, D, t)
     # stand so the blow sends him at the target: A on the far side of D from it
@@ -518,11 +532,11 @@ def held(f, t):
 
 
 @beat('weapons', weight=0.0, needs=lambda c, A, D, t: has_weapon(A) and not armed(A, t), pool=False)
-def draw_weapons(c, A, D, t):
+def draw_weapons(c, A, D, t, kind=None):
     """Weapons out: A draws (steel from his back) or forms his (out of his element); D answers with his own."""
     w = c.w
     t = circle(c, A, D, t, dur=0.7)
-    tA = arm(c, A, t, first=True)
+    tA = arm(c, A, t, first=True, kind=kind)
     tD = arm(c, D, t + 0.25, first=True) if has_weapon(D) else t
     w.cue('music', t=t + 0.4, section='fury')
     t = max(tA, tD) + 0.25
@@ -666,7 +680,7 @@ def blade_lock(c, A, D, t):
     tx_ = tr + 0.17
 
     def pass_clash(world):
-        mg.clash_fx(world, xm, floor_y(zm) - w.stage.ground(xm, zm, tx_, 999) - 30, zm, c.seed(), True)
+        mg.clash_fx(world, xm, floor_y(zm) - floor_at(c, xm, zm, tx_) - 30, zm, c.seed(), True)
         world.cue('clash', x=xm, big=True, ice=True)
         world.flash(tx_, 0.2, 0.08)
     w.at(tx_, pass_clash)
@@ -707,7 +721,7 @@ def disarm(c, A, D, t):
     s = sd(A, D, t)
     land_pt = (clamp_x(c, D.x_at(t) + s * 60, 10), clamp_z(c, D.z_at(t) + float(c.rng.uniform(-30, 30)), 8))
     t_land = tdis + 0.75
-    gl = w.stage.ground(land_pt[0], land_pt[1], t_land, 999)
+    gl = floor_at(c, land_pt[0], land_pt[1], t_land)
     c.stuck = (kind, land_pt, gl)
 
     def fling(world):
@@ -776,10 +790,17 @@ def heavy_smash(c, A, D, t):
         clash(c, A.name, D.name, t, 'hammer_swing', ah='n', dh=dh, dist=30, push=3)
         clash(c, A.name, D.name, t + 0.5, 'hammer_swing', ah='n', dh=dh, dist=30, push=3, big=True)
         t += 1.0
+    elif D.look.gear.get('shield') and D.shield_at(t):
+        # two swings on the way, both taken on the shield
+        strike(c, A.name, D.name, t, 'hammer_swing', 'guard', wep=('n', 'hammer'), block=True, knock=6, size=10,
+               settle_move='hammer_guard')
+        strike(c, A.name, D.name, t + 0.55, 'hammer_upper', 'guard', wep=('n', 'hammer'), block=True, knock=8, size=11,
+               settle_move='hammer_guard')
+        t += 1.1
     th = strike(c, A.name, None, t, 'hammer_swing', at=(tg.x - s * 9, floor_y(tg.z) - tg.h, tg.z + 2),
                 wep=('n', 'hammer'), settle_move='hammer_guard', quiet=True)
-    D.add(th - 0.3, 'flip', 0.62, to=(clamp_x(c, D.x_at(th) - s * 90, 6), clamp_z(c, D.z_at(th) + 30, 6)),
-          air=arc(36 * leap_k(D), D.y_at(th), w.stage.ground(D.x_at(th) - s * 90, D.z_at(th) + 30, th, 999)))
+    fl = (clamp_x(c, D.x_at(th) - s * 90, 6), clamp_z(c, D.z_at(th) + 30, 6))
+    D.add(th - 0.3, 'flip', 0.62, to=fl, air=arc(36 * leap_k(D), D.y_at(th), floor_at(c, fl[0], fl[1], th)))
     guard(D, th + 0.35)
     tl = tg.smash(w, th, 2.4 * power(A), s, c.seed())
     w.mark('pillar_falls' if tg.kind == 'pillar' else f'smash_{tg.kind}', (tl or th) + 0.1)
@@ -1087,7 +1108,7 @@ def ice_ball(c, A, D, t):
         dodge = False
     tz = D.z_at(rel_ + 0.3)
     if dodge:
-        end = (D.x_at(rel_ + 0.3) + 4 * sd(A, D, t), floor_y(tz) - w.stage.ground(D.x_at(rel_), tz, rel_, 999) - 2)
+        end = (D.x_at(rel_ + 0.3) + 4 * sd(A, D, t), floor_y(tz) - floor_at(c, D.x_at(rel_), tz, rel_) - 2)
     else:
         end = world_point(D, rel_ + 0.3, 'chest')
     t_end = rel_ + math.hypot(end[0] - hx, end[1] - hy) / 300.0
@@ -1098,7 +1119,7 @@ def ice_ball(c, A, D, t):
         D.add(rel_ + 0.05, 'back_flip', 0.55, air=arc(28 * leap_k(D), D.y_at(rel_), D.y_at(rel_)),
               dx=-6, blend=0.04)
         guard(D, rel_ + 0.62)
-        g = w.stage.ground(end[0], tz, t_end, 999)
+        g = floor_at(c, end[0], tz, t_end)
 
         def shatter(world):
             fx.burst(world, fx.ICE, end[0], end[1], tz, 26, (40, 140), angle=-math.pi / 2, spread=1.3, life=(0.6, 1.4),
@@ -1311,7 +1332,7 @@ def ice_spikes(c, A, D, t):
     lift = hgt * 0.9
     to = (clamp_x(c, x + s * 50 * pw, 6), clamp_z(c, z + float(rng.uniform(-10, 14)), 6))
     D.add(t_sp + 0.05, 'tumble', 0.9, to=to, ease=lambda u: u,
-          air=arc(lift, D.y_at(t_sp), w.stage.ground(to[0], to[1], t_sp + 1.0, 999)), blend=0.02)
+          air=arc(lift, D.y_at(t_sp), floor_at(c, to[0], to[1], t_sp + 1.0)), blend=0.02)
     w.cue('fly', t=t_sp, dur=0.9, who=D.name)
     w.trail(D.name, t_sp, t_sp + 0.9)
     t_up = fall_lie_up(c, D, t_sp + 0.95, -6, 0.35, 0.55, slow=True)
@@ -1579,7 +1600,7 @@ def shield_throw(c, A, D, t):
     pts = [(t_rel, p0)]
     tt = t_rel
     if tg is not None:
-        q = (tg.x, tg.z, tg.h * 0.6 + w.stage.ground(tg.x, tg.z, t_rel, 999))
+        q = (tg.x, tg.z, tg.h * 0.6 + floor_at(c, tg.x, tg.z, t_rel))
         tt += math.hypot(q[0] - p0[0], q[1] - p0[1]) / 380.0 + 0.05
         pts.append((tt, q))
         t_ric = tt
@@ -1690,7 +1711,7 @@ def acrobat_dodge(c, A, D, t):
     th = whiff(c, D.name, A.name, t + 0.25, big, WHERE.get(big, 'head'))
     over = (A.x_at(th) - s * 0 + s * 44, A.z_at(th))
     over = (clamp_x(c, over[0], 6), over[1])
-    g = c.w.stage.ground(over[0], over[1], th, 999)
+    g = floor_at(c, over[0], over[1], th)
     A.add(th - 0.25, 'flip', 0.6, to=over, air=arc(34 * leap_k(A), A.y_at(th), g), face=-s)
     t2 = th + 0.45
     kick = 'flip_kick' if 'flip_kick' in A.spec['strikes']['leap'] else choose_blow(c, A, 'heavy')
@@ -2002,9 +2023,15 @@ def spear(c, A, D, t, line='GET OVER HERE!'):
     drip(c, D.name, t_bite + 0.1, 300.0, 0.4, 'shoulder')
     w.words.append(T.Word(line, t_bite + 0.18, t_out + 0.5, 240, 50, 'big', T.FIRE, drop=10))
     w.at(t_bite + 0.18, lambda world: world.shake(t_bite + 0.18, 2.5, 0.35))
+    s = sd(A, D, t_yank)
+    a_ = area(c)
+    room = (a_['x'][1] - A.x_at(t_yank)) if s > 0 else (A.x_at(t_yank) - a_['x'][0])
     A.add(t_yank, 'yank', 0.45, dx=-4, ease=moves.out)
-    s = sd(A, D, t_out)
-    land_x = A.x_at(t_out) + s * 26.0
+    if room < 80:
+        # no floor in front of him (a cliff, the edge): the haul throws D over his head to land behind him
+        land_x = A.x_at(t_out) - s * 30.0
+    else:
+        land_x = A.x_at(t_out) + s * 26.0
     gA = w.stage.ground(A.x_at(t_out), A.z_at(t_out), t_out, A.y_at(t_out) + 2)
     D.add(t_pull, 'pulled', pull_dur, to=(land_x, A.z_at(t_out)), ease=lambda u: u ** 1.5,
           air=arc(26, D.y_at(t_pull), gA), blend=0.04)
@@ -2318,7 +2345,7 @@ def ice_shatter(c, A, D, t):
         fx.burst(world, fx.FROST, cx, cy, f.z, 80, (30, 140), life=(0.4, 1.0), seed=c.seed())
         world.effects.append(fx.Ring(cx, cy, th, 4, 70, 0.4, 'd8f4ff', thick=2))
         world.hidden[D.name] = True
-        world.flash(th, 0.5, 0.15, 'e8f8ff')
+        world.flash(th, 0.35, 0.08, 'e8f8ff')
         world.shake(th, 7.0, 0.6)
         world.cue('ice_shatter', who=D.name)
         world.cue('bone_crunch', who=D.name)
@@ -2345,7 +2372,7 @@ def knockout(c, A, D, t):
     to = (clamp_x(c, D.x_at(th) + s * 70 * power(A), 6), D.z_at(th))
     tumble_to(c, D, th, to, 0.8, 30)
     t_d = th + 0.8
-    g = w.stage.ground(to[0], to[1], t_d, 999)
+    g = floor_at(c, to[0], to[1], t_d)
     D.add(t_d, 'bounce', 0.4, air=arc(8, g, g))
     floor_hit(c, t_d, D.name, 1.5)
     D.add(t_d + 0.4, 'lie_front', 1.2, air=hold_y(g))

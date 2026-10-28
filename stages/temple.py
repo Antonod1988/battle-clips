@@ -1206,7 +1206,7 @@ def _update(self, world, t, dt):
 Stage.cam_limits = _cam_limits
 Stage.floor_lights = _floor_lights
 Stage.sprites = _sprites
-Stage.front = _front
+Stage.overlay = _front
 Stage.update = _update
 
 
