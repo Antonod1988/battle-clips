@@ -102,7 +102,7 @@ def main():
         os.makedirs(dst, exist_ok=True)
         for f in os.listdir(out_dir):
             p = os.path.join(out_dir, f)
-            if os.path.isfile(p) and not f.endswith('-silent.mp4'):
+            if os.path.isfile(p) and f.startswith(name) and not f.endswith('-silent.mp4') and '-preview' not in f:
                 shutil.copy2(p, os.path.join(dst, f))
         if os.path.isdir(os.path.join(out_dir, 'moments')):
             shutil.copytree(os.path.join(out_dir, 'moments'), os.path.join(dst, 'moments'), dirs_exist_ok=True)

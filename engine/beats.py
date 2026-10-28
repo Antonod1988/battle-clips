@@ -2325,6 +2325,7 @@ def ice_shatter(c, A, D, t):
     t_rel = t_go + 1.0 * moves.ICE_RELEASE
     element_hands(c, A.name, t_go, t_rel, 'ice')
     w.cue('music', t=t_rel, section='fatality')
+    held_block = []
 
     def freeze(world):
         f = world.f[D.name]
@@ -2333,9 +2334,10 @@ def ice_shatter(c, A, D, t):
         g = world.stage.ground(f.x, f.z, world.t, f.y + 2)
         pts = [v for k, v in j.items() if isinstance(v, tuple) and len(v) == 2 and k != 'up']
         box = (min(p[0] for p in pts) - 3, min(p[1] for p in pts) - 4, max(p[0] for p in pts) + 3, floor_y(f.z) - g + 1)
-        blk = fx.IceBlock(box, t_rel, t_rel + 1.5, t_rel + 2.4, c.seed())
+        blk = fx.IceBlock(box, t_rel, t_rel + 1.5, t_rel + 9.0, c.seed())
         blk.z = f.z
         world.effects.append(blk)
+        held_block.append(blk)
         fx.burst(world, fx.FROST, j['C'][0], j['C'][1], f.z, 80, (20, 100), life=(0.4, 1.0), seed=c.seed())
         world.flash(t_rel, 0.35, 0.12, 'cfefff')
         world.shake(t_rel, 3.0, 0.4)
@@ -2360,6 +2362,8 @@ def ice_shatter(c, A, D, t):
         fx.burst(world, fx.GORE, cx, cy, f.z, 16, (60, 200), life=(0.8, 1.6), size=(1, 2.2), seed=c.seed(), up=30)
         fx.burst(world, fx.FROST, cx, cy, f.z, 80, (30, 140), life=(0.4, 1.0), seed=c.seed())
         world.effects.append(fx.Ring(cx, cy, th, 4, 70, 0.4, 'd8f4ff', thick=2))
+        for blk in held_block:
+            blk.t1 = world.t                      # the ice block bursts with him
         world.hidden[D.name] = True
         world.flash(th, 0.35, 0.08, 'e8f8ff')
         world.shake(th, 7.0, 0.6)
