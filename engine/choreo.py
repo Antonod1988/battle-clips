@@ -259,7 +259,7 @@ def build_once(recipe, stage_mod, stage, specs, body=None):
                 trap = [pw['beat'] for pw in L_.spec['powers'] if pw.get('trap')][0]
                 t = run_beat(c, trap, L_, W_, t)
             else:
-                t = run_beat(c, 'comeback', L_, W_, t)
+                t = run_beat(c, 'comeback', W_, L_, t)     # the loser has him down, the winner comes back
             continue
         if act == 'climax':
             for p in act_pins:

@@ -105,7 +105,12 @@ def main():
             if os.path.isfile(p) and f.startswith(name) and not f.endswith('-silent.mp4') and '-preview' not in f:
                 shutil.copy2(p, os.path.join(dst, f))
         if os.path.isdir(os.path.join(out_dir, 'moments')):
-            shutil.copytree(os.path.join(out_dir, 'moments'), os.path.join(dst, 'moments'), dirs_exist_ok=True)
+            dm = os.path.join(dst, 'moments')
+            os.makedirs(dm, exist_ok=True)
+            for f in os.listdir(dm):                    # the review folder gets exactly this render's moments
+                if f.endswith('.png'):
+                    os.remove(os.path.join(dm, f))
+            shutil.copytree(os.path.join(out_dir, 'moments'), dm, dirs_exist_ok=True)
         print(f'REVIEW {dst}')
 
 

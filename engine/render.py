@@ -117,7 +117,11 @@ def video(world, out_dir, name, t_from=None, t_to=None, preview=False, log=print
     moms = [keep[('m', m)] for m, _ in marks if ('m', m) in keep and m in key]
     sheet(moms, os.path.join(out_dir, f'{name}{suffix}-moments.png'), cols=4)
     if not preview:
-        os.makedirs(os.path.join(out_dir, 'moments'), exist_ok=True)
+        mdir = os.path.join(out_dir, 'moments')
+        os.makedirs(mdir, exist_ok=True)
+        for old_png in os.listdir(mdir):           # a new render replaces the old moments (names change)
+            if old_png.endswith('.png'):
+                os.remove(os.path.join(mdir, old_png))
         for k, (mname, _) in enumerate(marks):
             if ('m', mname) in keep:
                 big(keep[('m', mname)][1]).save(os.path.join(out_dir, 'moments', f'{k + 1:02d}-{mname}.png'))
