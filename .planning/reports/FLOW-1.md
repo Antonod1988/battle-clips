@@ -174,3 +174,47 @@ D:/pythonProject4/lab-review/2026-10-28 versus-v5/versus-v5-1080p.mp4
 D:/pythonProject4/lab-review/2026-10-28 versus-v5/versus-v5-under-30mb.mp4
 D:/pythonProject4/lab-review/2026-10-28 subzero-vs-cap/subzero-vs-cap-1080p.mp4
 D:/pythonProject4/lab-review/2026-10-28 subzero-vs-cap/subzero-vs-cap-under-30mb.mp4
+
+## HULK-2: Hulk vs Captain America, version 2
+
+The owner wanted version 1 improved, not a Sub-Zero test («халка бы улучшил просто видео»). Remade through
+battle-clips as recipes/hulk-vs-cap.py: the city, 116 s, seed 2, winner the Hulk, universe 'marvel', finisher
+titan_smash, the heroic score. 28 beats, 26 of them pinned in version 1's order through all four areas.
+
+Media, D:/pythonProject4/lab-review/2026-10-28 hulk-vs-cap-v2/:
+- hulk-vs-cap-v2-1080p.mp4: 1920x1080, 30 fps, 116.0 s, 36.5 MB; hulk-vs-cap-v2-under-30mb.mp4: 27.8 MB.
+- hulk-vs-cap-v2-moments.png (56 moments) and moments/; the contact sheet, the track, the cue sheet, the log.
+
+Blows: 75 land and 2 are taken on the shield (version 1: 55 and 3). Standing still: two stretches of about half a
+second (Cap 40.5, the Hulk 52.9); nobody stands on nothing. Sound: -14.0 LUFS, true peak -1.2 dBFS, every cue kind
+registered; the city effects are made dry like SOUND-2 (short rooms, metal that no longer rings for a second);
+«FIGHT!», «HULK SMASH!» and «HULK WINS» in English.
+
+| Video s | What happens |
+| --- | --- |
+| 0-5.4 | MAIN ST. The Hulk drops out of the sky (0.9): crater, cars hop, windows burst; the title; FIGHT! |
+| 6.1-13.9 | Cap's opening string (9 blows) and a juggle (5). |
+| 13.9-19.5 | The backhand onto the blue car (15.9); the charge, Cap's slide, the Hulk trips into a lamp post (18.5). |
+| 19.5-21.9 | The shield off a lamp and a shop window into the Hulk's head and back. |
+| 21.9-25.4 | The Hulk lifts and throws the blue car; Cap flips over it; it goes through the pharmacy and its front collapses (24.9). |
+| 25.4-34.7 | Cap's counter; the Hulk catches his kick, slams him both sides (30.4) and throws him through the diner's west wall (32.8); charges through after him (33.9). |
+| 34.7-53.5 | THE DINER: the table kick (35.9), the shield cuts a pendant down on his head (37.8), the blows on the shield, the ground smash (41.5), Cap into the column (43.7), an 8-blow exchange, the throat, headbutts and the stomp (51-52.7). |
+| 53.5-57.8 | The thunderclap blows Cap through the east wall (55.7); the Hulk walks through (57.0). |
+| 57.8-72.6 | 5TH AVE: the leap crushes the silver car and shakes the BANK sign loose (59.3); Cap off a car's roof (62.8); the shield off a window and a car; the slab on the shield (68.9); Cap swatted through the bank's front, which collapses (71.6). |
+| 72.6-76.9 | The Hulk comes down from the sky; the road caves into the subway (74.7), the water main bursts. |
+| 76.9-89.6 | THE SUBWAY: Cap's 10-blow string, the rage (81.3), the third rail (82.9), the shield brings a light down, the Hulk driven into a steel column (88.3). |
+| 89.6-100.0 | By the throat up through the hole (92.3), slammed down (93.5); Cap's last stand: the shield off a car and a lamp, the leaping kick (98.7). |
+| 100.0-116.0 | HULK SMASH! (101.7): the haymaker on the shield, the street blown apart, the hanging signs come down, Cap blasted into a car; he falls back (108.1), the roar, HULK WINS (109.5), the end card (113.3). |
+
+Bigger than version 1: 19 s longer and 20 more blows; two building fronts collapse into ragged openings with rubble
+that stays (the pharmacy under the car, the bank under Cap; version 1 had a hole and a crater); the leap lands on a
+car and crushes it (version 1 flipped one beside him); hanging signs fall (under the leap and in the final blast);
+Cap's strings are 9 and 10 blows (version 1: 8). The rest of version 1's set pieces (the cave-in and water main, the
+two diner walls, the third rail, the leap back up) are kept, now as shared beats: ankle_slam, throat_slam, car_throw,
+chunk_throw, ground_smash, rage, charge_trip for any tier-5 fighter; long_combo, car_spring, table_kick, last_stand and
+the ricocheting shield for a trained human; titan_smash and the end card for a Marvel ending (no FINISH HIM, no
+FATALITY). Not listened to here: the owner's ears are the check.
+
+Result: DRAFT READY (the commit that adds this section on main)
+D:/pythonProject4/lab-review/2026-10-28 hulk-vs-cap-v2/hulk-vs-cap-v2-1080p.mp4
+D:/pythonProject4/lab-review/2026-10-28 hulk-vs-cap-v2/hulk-vs-cap-v2-under-30mb.mp4
