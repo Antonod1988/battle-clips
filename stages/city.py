@@ -983,7 +983,8 @@ class Target:
         k = self.kind
         if k == 'car':
             def ev(w):
-                r.state = 'wreck' if (power >= 2.0 or r.state == 'dent') else 'dent'
+                if r.state not in ('wreck', 'flipped'):            # a crushed car stays crushed
+                    r.state = 'wreck' if (power >= 2.0 or r.state == 'dent') else 'dent'
                 r.alarm_t = w.t
                 r.hop = (w.t, 6 + 6 * power)
                 glass_burst(w, r.x, floor_y(r.z) - 14, r.z, int(20 + 10 * power), seed, up=30)

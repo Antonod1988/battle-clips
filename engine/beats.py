@@ -1896,6 +1896,8 @@ def leap_smash(c, A, D, t):
                          life=(0.8, 1.6), size=(1, 1.6), seed=c.seed(), zs=0.9, up=30)
             world.cue('glass', x=x, power=1.5)
     w.at(tl, quake)
+    for k, tg in enumerate(x_ for x_ in w.stage.targets(c.area, tl) if x_.kind == 'sign' and abs(x_.x - x) < 170):
+        tg.smash(w, tl + 0.08 + 0.12 * k, 1.0, 1 if tg.x > x else -1, c.seed())      # the hanging signs shake loose
 
     def blown(world):
         world.f[D.name].flash_t = world.t
@@ -3177,6 +3179,9 @@ def titan_smash(c, A, D, t):
         world.cue('glass', t=world.t + 0.1, x=x, power=3.0)
         world.count['hits'] += 1
     w.at(th, blast)
+    x_b = D.x_at(th)
+    for k, tg in enumerate(x_ for x_ in w.stage.targets(c.area, th) if x_.kind == 'sign' and abs(x_.x - x_b) < 500):
+        tg.smash(w, th + 0.1 + 0.1 * k, 1.5, 1 if tg.x > x_b else -1, c.seed())    # every sign on the street comes down
     D.shields.append((th, False))
     tg = c.target_for(D, th, None, kinds=('car',), dirn=s, maxd=400)
     if tg is not None:
